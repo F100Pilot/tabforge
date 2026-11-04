@@ -168,6 +168,26 @@ def create_revision(
     return _tab_out(tab, revision)
 
 
+class PreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    score: Score
+
+
+class PreviewOut(BaseModel):
+    alphatex: str
+
+
+@router.post("/{tab_id}/preview", dependencies=[Depends(_limit_body)])
+def preview(
+    tab_id: uuid.UUID, body: PreviewRequest, user: CurrentUser, session: SessionDep
+) -> PreviewOut:
+    """alphaTex for an edited, unsaved score: the editor re-renders from this, so alphaTex is
+    still only ever generated server-side from a validated Score (threat model T5)."""
+    tab = _owned_tab(session, user, tab_id)
+    return PreviewOut(alphatex=to_alphatex(body.score, tab.title))
+
+
 @router.get("/{tab_id}/revisions")
 def list_revisions(tab_id: uuid.UUID, user: CurrentUser, session: SessionDep) -> RevisionList:
     tab = _owned_tab(session, user, tab_id)

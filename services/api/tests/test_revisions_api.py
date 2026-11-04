@@ -114,3 +114,20 @@ def test_oversized_body_is_413(client: TestClient, engine: Engine) -> None:
     )
     assert resp.status_code == 413
     assert resp.json()["code"] == "payload_too_large"
+
+
+def test_preview_renders_alphatex_without_saving(client: TestClient, engine: Engine) -> None:
+    tab, base = _tab(engine)
+    resp = client.post(f"/v1/tabs/{tab}/preview", json={"score": _score(9)})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["alphatex"].endswith("9.6.1 |")
+    assert client.get(f"/v1/tabs/{tab}").json()["revision"]["id"] == base
+
+
+def test_preview_validates_and_checks_ownership(client: TestClient, engine: Engine) -> None:
+    tab, _ = _tab(engine)
+    bad = _score()
+    bad["bars"][0]["beats"][0]["notes"][0]["fret"] = 30
+    assert client.post(f"/v1/tabs/{tab}/preview", json={"score": bad}).status_code == 422
+    other, _ = _tab(engine, "other@example.com")
+    assert client.post(f"/v1/tabs/{other}/preview", json={"score": _score()}).status_code == 404
