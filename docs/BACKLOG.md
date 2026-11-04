@@ -22,6 +22,7 @@
 - [ ] Fluxo ponta-a-ponta com pipeline stub
 
 ## M2 — MVP
+- [ ] Wireframes (upload, progresso, viewer, editor) aprovados antes de começar a UI do M2 (Fase 2 do SDLC)
 - [ ] Domínio: quantização rítmica (TDD), a partir de onsets e beats, sem depender de offsets do Basic Pitch (M0: F1 com offset de 0,55)
 - [ ] Domínio: atribuição corda/traste Viterbi (TDD)
 - [ ] Integração Demucs/Basic Pitch/librosa no worker (US-02)
