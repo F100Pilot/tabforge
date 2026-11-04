@@ -95,10 +95,9 @@ erDiagram
 | `GET` | `/v1/jobs/{id}` | Estado + etapa |
 | `GET` | `/v1/tabs/{id}` | Tab + revisão atual (score) + alphaTex gerado no servidor |
 | `POST` | `/v1/tabs/{id}/revisions` | Nova revisão (edição) |
-| `GET` | `/v1/tabs/{id}/export?format=gp\|midi` | Export |
 | `GET` | `/health`, `/ready` | Liveness / readiness |
 
-OpenAPI gerado automaticamente pelo FastAPI (`/openapi.json`) é a fonte de verdade. Implementado: auth e conta (US-07), uploads, jobs, tabs e revisões, `/health`, `/ready`; falta o export.
+OpenAPI gerado automaticamente pelo FastAPI (`/openapi.json`) é a fonte de verdade. Implementado: auth e conta (US-07), uploads, jobs, tabs e revisões, `/health`, `/ready`. O export Guitar Pro/MIDI (US-05) é feito no browser com o alphaTab, sem endpoint (ADR-0007).
 
 ### Validação de uploads (US-01)
 
@@ -144,3 +143,4 @@ OpenAPI gerado automaticamente pelo FastAPI (`/openapi.json`) é a fonte de verd
 - [ADR-0004](adr/0004-s3-de-desenvolvimento.md) — Object storage de desenvolvimento: versitygw em vez de MinIO
 - [ADR-0005](adr/0005-pacote-partilhado-score.md) — Pacote partilhado do score e Score v2
 - [ADR-0006](adr/0006-autenticacao.md) — Autenticação: link mágico por email e sessões opacas no servidor
+- [ADR-0007](adr/0007-export-no-browser.md) — Export Guitar Pro e MIDI no browser com o alphaTab

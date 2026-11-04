@@ -6,6 +6,7 @@ import type { AlphaTabApi } from "@coderline/alphatab";
 import { getTab, isUnauthenticated, readScoreInfo, type ScoreInfo, type Tab } from "@/lib/api";
 import { SignInPrompt } from "./sign-in-prompt";
 import { formatClock, formatTuning } from "@/lib/format";
+import { exportScore, saveFile, type ExportFormat } from "@/lib/export";
 import { loadScoreTheme, SCORE_COLORS, saveScoreTheme, type ScoreTheme } from "@/lib/score-theme";
 
 const ASSET_BASE = "/alphatab";
@@ -21,6 +22,15 @@ export function TabViewer({ tabId }: { tabId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [needsLogin, setNeedsLogin] = useState(false);
   const [theme, setTheme] = useState<ScoreTheme>(() => loadScoreTheme());
+  // Printing always uses the light palette; the chosen theme comes back after the dialog.
+  const [printing, setPrinting] = useState(false);
+  const printPendingRef = useRef(false);
+
+  useEffect(() => {
+    const done = () => setPrinting(false);
+    window.addEventListener("afterprint", done);
+    return () => window.removeEventListener("afterprint", done);
+  }, []);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -39,6 +49,21 @@ export function TabViewer({ tabId }: { tabId: string }) {
     saveScoreTheme(t);
   }
 
+  function print() {
+    if (theme === "light") {
+      window.print();
+      return;
+    }
+    printPendingRef.current = true;
+    setPrinting(true); // re-renders in light; onRenderFinished opens the dialog
+  }
+
+  function onRenderFinished() {
+    if (!printPendingRef.current) return;
+    printPendingRef.current = false;
+    requestAnimationFrame(() => window.print());
+  }
+
   if (needsLogin) return <SignInPrompt />;
   if (error) return <p role="alert" className="error">{error}</p>;
   if (!tab) return <p className="muted" role="status" aria-live="polite">A carregar a tablatura…</p>;
@@ -46,8 +71,8 @@ export function TabViewer({ tabId }: { tabId: string }) {
   const info = readScoreInfo(tab.revision.score);
   return (
     <>
-      <TabHeader tab={tab} info={info} theme={theme} onTheme={changeTheme} />
-      <TabPlayer alphatex={tab.alphatex} theme={theme} />
+      <TabHeader tab={tab} info={info} theme={theme} onTheme={changeTheme} onPrint={print} />
+      <TabPlayer alphatex={tab.alphatex} theme={printing ? "light" : theme} onRenderFinished={onRenderFinished} />
     </>
   );
 }
@@ -57,11 +82,13 @@ function TabHeader({
   info,
   theme,
   onTheme,
+  onPrint,
 }: {
   tab: Tab;
   info: ScoreInfo;
   theme: ScoreTheme;
   onTheme: (t: ScoreTheme) => void;
+  onPrint: () => void;
 }) {
   const tuning = formatTuning(tab.tuning);
   const omitted = info.warnings.length;
@@ -99,9 +126,7 @@ function TabHeader({
               </button>
             ))}
           </div>
-          <button type="button" className="btn" disabled title="Em breve">
-            Exportar
-          </button>
+          <ExportMenu tab={tab} onPrint={onPrint} />
           <Link
             href={`/tabs/${encodeURIComponent(tab.id)}/edit`}
             className="btn btn-primary"
@@ -120,7 +145,98 @@ function TabHeader({
   );
 }
 
-function TabPlayer({ alphatex, theme }: { alphatex: string; theme: ScoreTheme }) {
+function ExportMenu({ tab, onPrint }: { tab: Tab; onPrint: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent ? e.key === "Escape" : !rootRef.current?.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [open]);
+
+  async function download(format: ExportFormat) {
+    setOpen(false);
+    setError(null);
+    try {
+      const at = await import("@coderline/alphatab");
+      saveFile(exportScore(at, tab.alphatex, tab.title, format));
+    } catch (err) {
+      console.error("export failed", err);
+      setError("Não foi possível exportar a tablatura.");
+    }
+  }
+
+  return (
+    <div className="menu" ref={rootRef}>
+      <button
+        type="button"
+        className="btn"
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-controls="export-menu"
+        onClick={() => setOpen((v) => !v)}
+      >
+        Exportar<span aria-hidden="true" className="menu-caret">▾</span>
+      </button>
+      {open && (
+        <ul id="export-menu" className="menu-list card" role="list">
+          <li>
+            <button type="button" className="menu-item" onClick={() => void download("gp")}>
+              Guitar Pro <span className="muted mono">.gp</span>
+            </button>
+          </li>
+          <li>
+            <button type="button" className="menu-item" onClick={() => void download("midi")}>
+              MIDI <span className="muted mono">.mid</span>
+            </button>
+          </li>
+          <li>
+            <button
+              type="button"
+              className="menu-item"
+              onClick={() => {
+                setOpen(false);
+                onPrint();
+              }}
+            >
+              Imprimir / PDF
+            </button>
+          </li>
+        </ul>
+      )}
+      {error && (
+        <p role="alert" className="error menu-error">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function TabPlayer({
+  alphatex,
+  theme,
+  onRenderFinished,
+}: {
+  alphatex: string;
+  theme: ScoreTheme;
+  onRenderFinished: () => void;
+}) {
+  const onRenderFinishedRef = useRef(onRenderFinished);
+  useEffect(() => {
+    onRenderFinishedRef.current = onRenderFinished;
+  });
   const hostRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<AlphaTabApi | null>(null);
   const themeRef = useRef(theme);
@@ -160,7 +276,10 @@ function TabPlayer({ alphatex, theme }: { alphatex: string; theme: ScoreTheme })
       api.settings.notation.elements.set(at.NotationElement.ScoreTitle, false);
       api.settings.notation.elements.set(at.NotationElement.GuitarTuning, false);
       api.updateSettings();
-      api.renderFinished.on(() => setRendered(true));
+      api.renderFinished.on(() => {
+        setRendered(true);
+        onRenderFinishedRef.current();
+      });
       api.playerReady.on(() => {
         // Apply a speed chosen while the soundfont was still loading.
         if (api) api.playbackSpeed = speedRef.current / 100;

@@ -38,5 +38,5 @@
 - [x] E2E Playwright no CI (job `e2e`, pipeline stub): login por link → upload → tab → editar e guardar → terminar sessão → eliminar conta
 
 ## M3 — Iterações
-- [ ] Export GP/MIDI (US-05)
+- [x] Export Guitar Pro (.gp) e MIDI no browser com o alphaTab, PDF por impressão na paleta clara (US-05, ADR-0007)
 - [ ] Partilha pública (US-06) — bloqueado por ADR-0003
