@@ -15,9 +15,24 @@ class Settings(BaseSettings):
     database_url: PostgresDsn
     cors_origins: list[str] = []
 
-    # Walking-skeleton auth (M1): every request acts as one fixed dev user.
-    # Real auth is US-07 (M2). Refused outside env=dev, so prod fails closed (401).
+    # Dev fallback: requests without a session cookie act as one fixed dev user.
+    # Refused outside env=dev, so prod fails closed (401). Real auth: US-07, ADR-0006.
     dev_auth: bool = False
+
+    # US-07 auth (ADR-0006): magic link by email + opaque session cookie.
+    web_base_url: AnyHttpUrl = AnyHttpUrl("http://localhost:3000")  # where the link points
+    login_token_ttl_s: int = Field(default=900, gt=0, le=3600)
+    session_ttl_days: int = Field(default=30, gt=0, le=365)
+    # Threat model T4. Only dev over plain http turns this off.
+    session_cookie_secure: bool = True
+
+    # Generic SMTP (Mailpit in dev). Unset: env=dev logs the link; other envs refuse to start.
+    smtp_host: str | None = None
+    smtp_port: int = Field(default=587, gt=0, le=65535)
+    smtp_username: str | None = None
+    smtp_password: SecretStr | None = None
+    smtp_starttls: bool = True
+    mail_from: str = "TabForge <no-reply@tabforge.local>"
 
     # Object storage (S3 API). Endpoints unset = AWS defaults.
     s3_endpoint_url: AnyHttpUrl | None = None

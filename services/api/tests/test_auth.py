@@ -34,3 +34,33 @@ def test_presign_ttl_capped_at_five_minutes() -> None:
 def test_sqlalchemy_url_selects_psycopg_driver() -> None:
     settings = Settings(database_url=URL)  # type: ignore[arg-type]
     assert settings.sqlalchemy_url.startswith("postgresql+psycopg://")
+
+
+def test_app_refuses_to_start_outside_dev_without_smtp() -> None:
+    settings = Settings(database_url=URL, env="prod")  # type: ignore[arg-type]
+    with pytest.raises(RuntimeError, match="SMTP_HOST"):
+        create_app(settings, store=FakeStore())
+
+
+def test_cors_allows_credentials_and_csrf_header_for_listed_origin() -> None:
+    settings = Settings(database_url=URL, cors_origins=["http://localhost:3000"])  # type: ignore[arg-type]
+    client = TestClient(create_app(settings, store=FakeStore()))
+    resp = client.options(
+        "/v1/me",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "DELETE",
+            "Access-Control-Request-Headers": "content-type, x-csrf-token",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert resp.headers["access-control-allow-credentials"] == "true"
+    assert "x-csrf-token" in resp.headers["access-control-allow-headers"].lower()
+    assert "DELETE" in resp.headers["access-control-allow-methods"]
+
+
+def test_cors_wildcard_origin_refused() -> None:
+    settings = Settings(database_url=URL, cors_origins=["*"])  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="explicit origins"):
+        create_app(settings, store=FakeStore())

@@ -18,7 +18,7 @@ from tabforge_api.settings import Settings
 from tabforge_api.storage import ObjectInfo
 
 TEST_DB_ENV = "TABFORGE_TEST_DATABASE_URL"
-TABLES = "jobs, tab_revisions, tabs, audio_assets, users"
+TABLES = "sessions, login_tokens, jobs, tab_revisions, tabs, audio_assets, users"
 
 
 @dataclass
@@ -46,8 +46,22 @@ class FakeStore:
         self.objects[key] = (data, content_type)
 
 
+@dataclass
+class FakeMailer:
+    """Records messages instead of sending them; `fail` simulates an SMTP outage."""
+
+    sent: list[tuple[str, str, str]] = field(default_factory=list)
+    fail: bool = False
+
+    def send(self, to: str, subject: str, body: str) -> None:
+        if self.fail:
+            raise OSError("smtp down")
+        self.sent.append((to, subject, body))
+
+
 def _settings(url: str, **overrides: object) -> Settings:  # shared with other tests
-    return Settings(database_url=url, dev_auth=True, **overrides)  # type: ignore[arg-type]
+    values: dict[str, object] = {"dev_auth": True, **overrides}
+    return Settings(database_url=url, **values)  # type: ignore[arg-type]
 
 
 @pytest.fixture(scope="session")
@@ -83,5 +97,10 @@ def store() -> FakeStore:
 
 
 @pytest.fixture
-def client(engine: Engine, database_url: str, store: FakeStore) -> TestClient:
-    return TestClient(create_app(_settings(database_url), store=store))
+def mailer() -> FakeMailer:
+    return FakeMailer()
+
+
+@pytest.fixture
+def client(engine: Engine, database_url: str, store: FakeStore, mailer: FakeMailer) -> TestClient:
+    return TestClient(create_app(_settings(database_url), store=store, mailer=mailer))

@@ -1,6 +1,7 @@
-"""Request-scoped dependencies: settings, DB session, object store, current user."""
+"""Request-scoped dependencies: settings, DB session, object store, mailer, current user."""
 
 from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends, Request
@@ -8,8 +9,16 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from tabforge_api.auth import (
+    CSRF_HEADER,
+    SESSION_COOKIE,
+    csrf_matches,
+    hash_token,
+    is_unsafe_method,
+)
 from tabforge_api.db import session_scope
-from tabforge_api.models import User
+from tabforge_api.mailer import Mailer
+from tabforge_api.models import AuthSession, User
 from tabforge_api.problems import ProblemError
 from tabforge_api.settings import Settings
 from tabforge_api.storage import ObjectStore
@@ -31,18 +40,46 @@ def get_store(request: Request) -> ObjectStore:
     return store
 
 
+def get_mailer(request: Request) -> Mailer:
+    mailer: Mailer = request.app.state.mailer
+    return mailer
+
+
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 SessionDep = Annotated[Session, Depends(get_session)]
 StoreDep = Annotated[ObjectStore, Depends(get_store)]
+MailerDep = Annotated[Mailer, Depends(get_mailer)]
 
 
-def get_current_user(session: SessionDep, settings: SettingsDep) -> User:
-    """M1 stub: the fixed dev user when dev_auth is on; otherwise nobody (401).
+@dataclass(frozen=True, slots=True)
+class Principal:
+    """Who is calling. `auth_session` is None on the dev_auth fallback (no cookie, no CSRF)."""
 
-    US-07 (M2) replaces this with session-cookie auth; routes depend only on this function.
-    """
-    if not settings.dev_auth:
-        raise ProblemError(401, "unauthenticated", "authentication required")
+    user: User
+    auth_session: AuthSession | None
+
+
+def find_auth_session(request: Request, session: Session) -> AuthSession | None:
+    """The unexpired session named by the cookie, if any."""
+    cookie = request.cookies.get(SESSION_COOKIE)
+    if not cookie:
+        return None
+    return session.execute(
+        select(AuthSession).where(
+            AuthSession.token_hash == hash_token(cookie), AuthSession.expires_at > func.now()
+        )
+    ).scalar_one_or_none()
+
+
+def require_csrf(request: Request, auth_session: AuthSession) -> None:
+    """Synchronizer token (threat model T4): unsafe methods must echo the session's token."""
+    if is_unsafe_method(request.method) and not csrf_matches(
+        auth_session.csrf_token, request.headers.get(CSRF_HEADER)
+    ):
+        raise ProblemError(403, "csrf_failed", "missing or invalid CSRF token")
+
+
+def _dev_user(session: Session) -> User:
     session.execute(
         insert(User)
         .values(email=DEV_USER_EMAIL)
@@ -51,6 +88,27 @@ def get_current_user(session: SessionDep, settings: SettingsDep) -> User:
     return session.execute(
         select(User).where(func.lower(User.email) == DEV_USER_EMAIL)
     ).scalar_one()
+
+
+def get_principal(request: Request, session: SessionDep, settings: SettingsDep) -> Principal:
+    """Session cookie first; else the dev_auth fallback (env=dev only); else 401."""
+    auth_session = find_auth_session(request, session)
+    if auth_session is not None:
+        require_csrf(request, auth_session)
+        user = session.get(User, auth_session.user_id)
+        if user is not None:
+            return Principal(user, auth_session)
+    if settings.dev_auth:
+        return Principal(_dev_user(session), None)
+    raise ProblemError(401, "unauthenticated", "authentication required")
+
+
+PrincipalDep = Annotated[Principal, Depends(get_principal)]
+
+
+def get_current_user(principal: PrincipalDep) -> User:
+    """Routes depend only on this (or CurrentUser)."""
+    return principal.user
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]

@@ -24,6 +24,11 @@ services:
     ports: ["127.0.0.1:7070:7070"]
     volumes: [s3data:/data]
 
+  # Dev SMTP sink for login links (US-07, ADR-0006). Inbox UI: http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:v1.31.6
+    ports: ["127.0.0.1:8025:8025", "127.0.0.1:1025:1025"]
+
   # One-shot: apply migrations and create the bucket (with CORS for the web origin).
   migrate:
     build: { context: ., dockerfile: services/api/Dockerfile }
@@ -39,6 +44,7 @@ services:
     ports: ["127.0.0.1:8000:8000"]
     depends_on:
       migrate: { condition: service_completed_successfully }
+      mailpit: { condition: service_started }
 
   worker:
     build: { context: ., dockerfile: services/worker/Dockerfile }
