@@ -8,8 +8,8 @@
 
 ## M0 — Spike de qualidade (antes de investir em UI)
 - [ ] Montar set de avaliação: 20 clips de guitarra (isolada e em mix) com tab de referência **de direitos livres ou próprios**
-- [ ] Script de avaliação: note F1 (mir_eval), precisão corda/traste
-- [ ] Baseline Demucs 6s + Basic Pitch; registar resultados em `docs/eval/`
+- [x] Script de avaliação: note F1 (mir_eval) — `services/worker/eval/`. Precisão corda/traste fica para o M2 (não há atribuição ainda)
+- [ ] Baseline Demucs 6s + Basic Pitch; registar resultados em `docs/eval/` — Basic Pitch feito (`docs/eval/M0-baseline.md`); Demucs bloqueado por rede
 - [ ] Decisão go/no-go sobre a abordagem (atualizar ADR-0002)
 
 ## M1 — Walking skeleton
@@ -17,7 +17,7 @@
 - [ ] API: migrações iniciais (users, audio_assets, jobs, tabs, tab_revisions)
 - [ ] Upload pré-assinado + validação (US-01)
 - [ ] Worker: loop de fila SKIP LOCKED com etapas stub
-- [ ] Teste de integração: inferência Basic Pitch ONNX real num clip sintético (guarda os overrides do ADR-0002)
+- [x] Teste de integração: inferência Basic Pitch ONNX real num clip sintético (guarda os overrides do ADR-0002) — feito no M0
 - [ ] Web: página que renderiza um alphaTex fixo com playback (US-03 parcial)
 - [ ] Fluxo ponta-a-ponta com pipeline stub
 

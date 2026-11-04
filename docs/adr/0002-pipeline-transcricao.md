@@ -34,8 +34,24 @@ Factos verificados (2026-11-04):
 
 - (+) Um único Python em todo o backend; sem TensorFlow (imagem menor, sem advisories de keras/protobuf). Audit do lock: 0 vulnerabilidades conhecidas.
 - (+) Modelos substituíveis sem tocar no domínio; domínio testável sem GPU.
-- (−) Os overrides contrariam restrições declaradas pelo `basic-pitch`. Mitigação: teste de integração (M1) que corre inferência ONNX real num clip sintético e falha se o comportamento mudar.
+- (−) Os overrides contrariam restrições declaradas pelo `basic-pitch`. Mitigação: teste de integração `tests/test_basic_pitch_onnx.py` (`pytest -m ml`, workflow `ml.yml`) que corre inferência ONNX real num clip sintético (E4→64, A4→69) e verifica que o TensorFlow não está instalado. Implementado no M0.
 - (−) `basic-pitch` sem release desde 0.4.0 → risco de abandono; avaliar alternativas em M0.
 - (−) Separação de guitarra do Demucs 6s é de qualidade moderada; mitigado aceitando upload de stem isolada.
 - (−) `uv lock` preserva versões já fixadas: correr `uv lock --upgrade` periodicamente (Dependabot cobre PRs).
-- Não verificado ainda: execução real do Demucs no container, consumo de memória/GPU, licença dos pesos pré-treinados → M0. Registar em `docs/THIRD_PARTY.md`.
+- Não verificado ainda: execução real do Demucs (pesos bloqueados pela rede do ambiente no M0), consumo de memória/GPU do Demucs, licença dos pesos pré-treinados. Registar em `docs/THIRD_PARTY.md`.
+
+## Resultados do M0 (2026-11-04, parciais)
+
+Detalhe e reprodução em [`docs/eval/M0-baseline.md`](../eval/M0-baseline.md).
+
+- Basic Pitch ONNX no GuitarSet (360 faixas, áudio de microfone): note F1 **0,772** (onset ±50 ms) e **0,545** com offset. Comp 0,720 / 0,431; solo 0,824 / 0,659.
+- CPU (4 vCPU, sem GPU): 1,1–1,4 s por minuto de áudio; pico de RSS 254 MiB (60 s) e 367 MiB (180 s).
+- Os limiares do Basic Pitch movem o F1 no máximo ±0,03. Não compensam afinação.
+- Corda/traste: 95,1% das notas de referência têm mais de uma posição possível; a regra "traste mais baixo" acerta 45,4%. Confirma que a atribuição (Viterbi, M2) é o diferencial.
+- O Basic Pitch foi treinado com GuitarSet (e Slakh): os números são um limite superior e não servem como estimativa de generalização.
+- Demucs `htdemucs_6s`: não medido (pesos inacessíveis). O efeito da separação e o custo em mistura continuam por medir.
+
+Conclusões:
+- O backend ONNX funciona em Python 3.13 sem TensorFlow, em todo o dataset, com custo de CPU baixo. A decisão de dependências mantém-se.
+- Onsets e pitch dão um rascunho utilizável para guitarra isolada. Offsets e durações não (F1 0,55; 0,43 em acordes): a quantização rítmica (M2) não pode depender de offsets do Basic Pitch.
+- A decisão go/no-go para áudio em mistura fica pendente da medição do Demucs e de um set de avaliação fora do treino do Basic Pitch.
