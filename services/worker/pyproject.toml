@@ -18,6 +18,10 @@ ml = [
   # Floor: torch<2.6 has a torch.load RCE even with weights_only=True (CVE-2025-32434).
   "torch>=2.6",
 ]
+# M0 evaluation tooling (services/worker/eval). Not installed in the worker image.
+eval = [
+  "mir_eval>=0.8.2",
+]
 
 [dependency-groups]
 dev = [
@@ -48,8 +52,16 @@ strict = true
 python_version = "3.13"
 mypy_path = "src"
 
+# Untyped (no py.typed) or absent in the fast CI env, which installs no extras.
+[[tool.mypy.overrides]]
+module = ["basic_pitch.*", "mir_eval.*", "demucs.*", "torch.*", "numpy.*", "soundfile.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Fast CI skips ML tests; run them with `uv sync --extra ml --extra eval && uv run pytest -m ml`.
+addopts = "-m 'not ml'"
+markers = ["ml: needs the ml/eval extras (real model inference, mir_eval)"]
 
 [tool.uv]
 # Worker runs only in Linux containers. Without this, a demucs constraint for
