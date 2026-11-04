@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { getJob, listJobs, type Job, type SourceKind } from "@/lib/api";
+import { getJob, isUnauthenticated, listJobs, type Job, type SourceKind } from "@/lib/api";
+import { SignInPrompt } from "./sign-in-prompt";
 import { errorMessage, STEPS, stepHint, stepStates } from "@/lib/job-view";
 
 const POLL_MS = 2000;
@@ -13,6 +14,7 @@ export function JobStatusView({ jobId }: { jobId: string }) {
   const [job, setJob] = useState<Job | null>(null);
   const [sourceKind, setSourceKind] = useState<SourceKind | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [needsLogin, setNeedsLogin] = useState(false);
 
   // source_kind is only exposed by the list endpoint; best effort, once.
   useEffect(() => {
@@ -43,6 +45,10 @@ export function JobStatusView({ jobId }: { jobId: string }) {
         if (j.status === "failed") return;
       } catch (err) {
         if (ctrl.signal.aborted) return;
+        if (isUnauthenticated(err)) {
+          setNeedsLogin(true);
+          return;
+        }
         setError(err instanceof Error ? err.message : "Erro ao consultar o estado.");
       }
       timer = setTimeout(poll, POLL_MS);
@@ -54,6 +60,8 @@ export function JobStatusView({ jobId }: { jobId: string }) {
       if (timer) clearTimeout(timer);
     };
   }, [jobId, router]);
+
+  if (needsLogin) return <SignInPrompt />;
 
   if (job?.status === "failed") {
     return (

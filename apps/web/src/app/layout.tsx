@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
+import { SessionProvider } from "@/components/session-provider";
 import { SideNav } from "@/components/side-nav";
 import "./globals.css";
 
@@ -16,12 +17,14 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="pt" className={`${geist.variable} ${geistMono.variable}`}>
       <body>
-        <div className="shell">
-          <Suspense fallback={<div className="sidenav" />}>
-            <SideNav />
-          </Suspense>
-          <main className="content">{children}</main>
-        </div>
+        <SessionProvider>
+          <div className="shell">
+            <Suspense fallback={<div className="sidenav" />}>
+              <SideNav />
+            </Suspense>
+            <main className="content">{children}</main>
+          </div>
+        </SessionProvider>
       </body>
     </html>
   );

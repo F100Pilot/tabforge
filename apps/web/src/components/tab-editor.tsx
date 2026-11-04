@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AlphaTabApi } from "@coderline/alphatab";
 import {
+  isUnauthenticated,
   ProblemError,
   getTab,
   listRevisions,
@@ -42,6 +43,7 @@ import {
   type Selection,
   type TypeBuffer,
 } from "@/lib/editor";
+import { SignInPrompt } from "./sign-in-prompt";
 import { formatDate } from "@/lib/format";
 import { loadScoreTheme, SCORE_COLORS, type ScoreTheme } from "@/lib/score-theme";
 
@@ -51,6 +53,7 @@ const CONFLICT_MESSAGE = "A tab foi alterada noutro lado. Recarregue para ver a 
 export function TabEditor({ tabId }: { tabId: string }) {
   const [tab, setTab] = useState<Tab | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [needsLogin, setNeedsLogin] = useState(false);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -58,11 +61,13 @@ export function TabEditor({ tabId }: { tabId: string }) {
       .then(setTab)
       .catch((err: unknown) => {
         if (ctrl.signal.aborted) return;
-        setError(err instanceof Error ? err.message : "Erro ao carregar a tablatura.");
+        if (isUnauthenticated(err)) setNeedsLogin(true);
+        else setError(err instanceof Error ? err.message : "Erro ao carregar a tablatura.");
       });
     return () => ctrl.abort();
   }, [tabId]);
 
+  if (needsLogin) return <SignInPrompt />;
   if (error) return <p role="alert" className="error">{error}</p>;
   if (!tab) return <p className="muted" role="status" aria-live="polite">A carregar o editor…</p>;
   let score: Score;
@@ -102,6 +107,7 @@ function resourceColors(theme: ScoreTheme) {
 }
 
 function describeError(err: unknown, fallback: string): string {
+  if (isUnauthenticated(err)) return "A sessão terminou. Inicie sessão para continuar.";
   return err instanceof Error ? err.message : fallback;
 }
 

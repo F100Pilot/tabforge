@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { listJobs, type JobSummary } from "@/lib/api";
+import { isUnauthenticated, listJobs, type JobSummary } from "@/lib/api";
 import { formatDuration, relativeTime } from "@/lib/format";
 import { jobHref, jobTitle, statusView } from "@/lib/job-view";
 
 export function RecentJobs() {
   const [jobs, setJobs] = useState<JobSummary[] | null>(null);
   const [failed, setFailed] = useState(false);
+  const [needsLogin, setNeedsLogin] = useState(false);
   const [now, setNow] = useState<number | null>(null);
 
   useEffect(() => {
@@ -18,8 +19,10 @@ export function RecentJobs() {
         setJobs(j);
         setNow(Date.now());
       })
-      .catch(() => {
-        if (!ctrl.signal.aborted) setFailed(true);
+      .catch((err: unknown) => {
+        if (ctrl.signal.aborted) return;
+        if (isUnauthenticated(err)) setNeedsLogin(true);
+        else setFailed(true);
       });
     return () => ctrl.abort();
   }, []);
@@ -27,7 +30,11 @@ export function RecentJobs() {
   return (
     <section aria-labelledby="recent-h" className="recent">
       <h2 id="recent-h">Recentes</h2>
-      {failed ? (
+      {needsLogin ? (
+        <p className="muted">
+          <Link href="/login">Inicie sessão</Link> para continuar.
+        </p>
+      ) : failed ? (
         <p className="muted">Não foi possível carregar as tabs recentes.</p>
       ) : !jobs ? (
         <p className="muted" role="status">A carregar…</p>

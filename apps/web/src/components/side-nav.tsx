@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { SideNavAccount } from "./side-nav-account";
 
 const LINKS = [
   { href: "/", label: "Nova tablatura", match: (p: string) => p === "/" },
@@ -34,6 +35,7 @@ export function SideNav() {
           })}
         </ul>
       </nav>
+      <SideNavAccount />
     </header>
   );
 }

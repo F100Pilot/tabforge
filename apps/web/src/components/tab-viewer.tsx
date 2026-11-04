@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { AlphaTabApi } from "@coderline/alphatab";
-import { getTab, readScoreInfo, type ScoreInfo, type Tab } from "@/lib/api";
+import { getTab, isUnauthenticated, readScoreInfo, type ScoreInfo, type Tab } from "@/lib/api";
+import { SignInPrompt } from "./sign-in-prompt";
 import { formatClock, formatTuning } from "@/lib/format";
 import { loadScoreTheme, SCORE_COLORS, saveScoreTheme, type ScoreTheme } from "@/lib/score-theme";
 
@@ -18,6 +19,7 @@ function resourceColors(theme: ScoreTheme) {
 export function TabViewer({ tabId }: { tabId: string }) {
   const [tab, setTab] = useState<Tab | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [needsLogin, setNeedsLogin] = useState(false);
   const [theme, setTheme] = useState<ScoreTheme>(() => loadScoreTheme());
 
   useEffect(() => {
@@ -26,7 +28,8 @@ export function TabViewer({ tabId }: { tabId: string }) {
       .then(setTab)
       .catch((err: unknown) => {
         if (ctrl.signal.aborted) return;
-        setError(err instanceof Error ? err.message : "Erro ao carregar a tablatura.");
+        if (isUnauthenticated(err)) setNeedsLogin(true);
+        else setError(err instanceof Error ? err.message : "Erro ao carregar a tablatura.");
       });
     return () => ctrl.abort();
   }, [tabId]);
@@ -36,6 +39,7 @@ export function TabViewer({ tabId }: { tabId: string }) {
     saveScoreTheme(t);
   }
 
+  if (needsLogin) return <SignInPrompt />;
   if (error) return <p role="alert" className="error">{error}</p>;
   if (!tab) return <p className="muted" role="status" aria-live="polite">A carregar a tablatura…</p>;
 

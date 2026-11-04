@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
-import { completeUpload, createUpload, putFile, type SourceKind } from "@/lib/api";
+import { completeUpload, createUpload, isUnauthenticated, putFile, type SourceKind } from "@/lib/api";
 import { checkFile } from "@/lib/file-checks";
 
 type Phase = "idle" | "preparing" | "uploading" | "finishing";
@@ -19,6 +20,7 @@ export function UploadForm() {
   const [file, setFile] = useState<File | null>(null);
   const [kind, setKind] = useState<SourceKind>("guitar_stem");
   const [error, setError] = useState<string | null>(null);
+  const [needsLogin, setNeedsLogin] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const busy = phase !== "idle";
@@ -35,6 +37,7 @@ export function UploadForm() {
       return;
     }
     setError(null);
+    setNeedsLogin(false);
     try {
       setPhase("preparing");
       const ticket = await createUpload(file, kind);
@@ -44,7 +47,14 @@ export function UploadForm() {
       const job = await completeUpload(ticket.audio_id);
       router.push(`/jobs/${encodeURIComponent(job.id)}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ocorreu um erro inesperado.");
+      setError(
+        isUnauthenticated(err)
+          ? "Inicie sessão para continuar."
+          : err instanceof Error
+            ? err.message
+            : "Ocorreu um erro inesperado.",
+      );
+      setNeedsLogin(isUnauthenticated(err));
       setPhase("idle");
     }
   }
@@ -130,6 +140,11 @@ export function UploadForm() {
       <p role="alert" className="error">
         {error}
       </p>
+      {needsLogin && (
+        <Link href="/login" className="btn btn-primary btn-block">
+          Iniciar sessão
+        </Link>
+      )}
     </form>
   );
 }

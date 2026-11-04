@@ -224,8 +224,69 @@ export function apiBaseUrl(): URL {
   return parsePublicConfig({ NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL }).apiBaseUrl;
 }
 
+export interface SessionUser {
+  id: string;
+  email: string;
+}
+
+export interface Session {
+  user: SessionUser;
+  csrf_token: string | null;
+}
+
+const UNSAFE_METHODS: readonly string[] = ["POST", "PUT", "PATCH", "DELETE"];
+
+/** Adds `X-CSRF-Token` on unsafe methods when a token is known; never mutates `base`. */
+export function csrfHeaders(method: string, base: HeadersInit | undefined, token: string | null): Headers {
+  const headers = new Headers(base);
+  if (token !== null && UNSAFE_METHODS.includes(method.toUpperCase())) {
+    headers.set("X-CSRF-Token", token);
+  }
+  return headers;
+}
+
+let csrfToken: string | null = null;
+
+/** Called with the `csrf_token` from every session/verify response (null clears it). */
+export function setCsrfToken(token: string | null): void {
+  csrfToken = token;
+}
+
+export function getCsrfToken(): string | null {
+  return csrfToken;
+}
+
+/** True for the API's 401 `unauthenticated` problem (also any 401). */
+export function isUnauthenticated(err: unknown): boolean {
+  return err instanceof ProblemError && err.status === 401;
+}
+
+export function parseSession(v: unknown): Session {
+  if (
+    !isRec(v) ||
+    !isRec(v.user) ||
+    !isStr(v.user.id) ||
+    !isStr(v.user.email) ||
+    !isNullableStr(v.csrf_token ?? null)
+  ) {
+    throw new ResponseShapeError("session");
+  }
+  return { user: { id: v.user.id, email: v.user.email }, csrf_token: (v.csrf_token as string | null | undefined) ?? null };
+}
+
+/** Accepts any JSON object (the 202 body is `{}`); rejects anything else. */
+export function parseEmptyObject(v: unknown, what: string): void {
+  if (v !== undefined && !isRec(v)) throw new ResponseShapeError(what);
+}
+
 async function request(path: string, init?: RequestInit): Promise<unknown> {
-  const res = await fetch(new URL(path, apiBaseUrl()), { cache: "no-store", ...init });
+  const method = init?.method ?? "GET";
+  const res = await fetch(new URL(path, apiBaseUrl()), {
+    cache: "no-store",
+    ...init,
+    credentials: "include",
+    headers: csrfHeaders(method, init?.headers, csrfToken),
+  });
   let body: unknown = undefined;
   try {
     body = await res.json();
@@ -343,4 +404,55 @@ export async function saveRevision(tabId: string, baseRevisionId: string, score:
 
 export async function listRevisions(tabId: string, signal?: AbortSignal) {
   return parseRevisionList(await request(`/v1/tabs/${encodeURIComponent(tabId)}/revisions`, { signal }));
+}
+
+/** Asks for a login link by email. Always resolves for a valid address (the API never reveals if it exists). */
+export async function requestMagicLink(email: string): Promise<void> {
+  parseEmptyObject(
+    await request("/v1/auth/magic-link", {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ email }),
+    }),
+    "magic-link",
+  );
+}
+
+/** Exchanges the emailed token for a session cookie. 400 `invalid_token` when expired/used/unknown. */
+export async function verifyLogin(token: string): Promise<Session> {
+  const session = parseSession(
+    await request("/v1/auth/verify", {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ token }),
+    }),
+  );
+  setCsrfToken(session.csrf_token);
+  return session;
+}
+
+/** Current session, or null when anonymous (401). */
+export async function getSession(signal?: AbortSignal): Promise<Session | null> {
+  try {
+    const session = parseSession(await request("/v1/auth/session", { signal }));
+    setCsrfToken(session.csrf_token);
+    return session;
+  } catch (err) {
+    if (isUnauthenticated(err)) {
+      setCsrfToken(null);
+      return null;
+    }
+    throw err;
+  }
+}
+
+export async function logout(): Promise<void> {
+  await request("/v1/auth/logout", { method: "POST" });
+  setCsrfToken(null);
+}
+
+/** Permanently deletes the account, audio and tabs. 503 `storage_unavailable` → retry later. */
+export async function deleteAccount(): Promise<void> {
+  await request("/v1/me", { method: "DELETE" });
+  setCsrfToken(null);
 }
