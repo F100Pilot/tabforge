@@ -23,11 +23,23 @@ log = logging.getLogger("tabforge_desktop")
 READY_TIMEOUT_S = 90
 
 
-def wait_for(url: str, timeout_s: float = READY_TIMEOUT_S) -> None:
-    """Polls until `url` answers 2xx/3xx; raises TimeoutError otherwise."""
+def tail(path: Path, lines: int = 40) -> str:
+    try:
+        return "\n".join(path.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:])
+    except OSError:
+        return "(sem registo)"
+
+
+def wait_for(
+    url: str, timeout_s: float = READY_TIMEOUT_S, failed: Callable[[], str | None] | None = None
+) -> None:
+    """Polls until `url` answers 2xx/3xx. `failed` returns a reason when the server has died,
+    so a crash is reported at once (with its log) instead of after the whole timeout."""
     deadline = time.monotonic() + timeout_s
     last: Exception | None = None
     while time.monotonic() < deadline:
+        if failed is not None and (reason := failed()) is not None:
+            raise RuntimeError(f"{url}: {reason}")
         try:
             with urllib.request.urlopen(url, timeout=2) as response:  # noqa: S310 - fixed loopback URL
                 if response.status < 400:
@@ -57,6 +69,7 @@ class Desktop:
     pipeline: str = "real"
     launch_token: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     _stops: list[Callable[[], None]] = field(default_factory=list)
+    _web: subprocess.Popen[bytes] | None = None
 
     def start(self) -> None:
         self.data.create()
@@ -84,7 +97,7 @@ class Desktop:
         self._start_worker()
         self._start_web()
         wait_for(f"{API_URL}/ready")
-        wait_for(f"{WEB_URL}/login")
+        wait_for(f"{WEB_URL}/login", failed=self._web_failed)
         log.info('{"event": "desktop_ready"}')
 
     def login_url(self) -> str:
@@ -132,6 +145,7 @@ class Desktop:
             stderr=subprocess.STDOUT,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
+        self._web = process
 
         def stop() -> None:
             process.terminate()
@@ -142,6 +156,12 @@ class Desktop:
             log_file.close()
 
         self._stops.append(stop)
+
+    def _web_failed(self) -> str | None:
+        if self._web is None or self._web.poll() is None:
+            return None
+        log_file = self.data.logs / "web.log"
+        return f"web server exited with code {self._web.returncode}; {log_file}:\n{tail(log_file)}"
 
     def stop(self) -> None:
         while self._stops:
