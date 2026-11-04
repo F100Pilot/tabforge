@@ -36,8 +36,8 @@ def test_valid_score_parses() -> None:
 def test_to_alphatex_writes_header_bars_notes_chords_and_rests() -> None:
     tex = to_alphatex(Score.model_validate(_score()), title="Riff")
     assert tex == (
-        '\\title "Riff" \\tempo 90 \\tuning E4 B3 G3 D3 A2 E2 .\n'
-        "\\ts 4 4 0.6.4 3.5.4 (0.1 1.2).4 r.4 |"
+        '\\title "Riff" \\tempo 90 \\tuning (E4 B3 G3 D3 A2 E2)\n'
+        "\\ts (4 4) 0.6.4 3.5.4 (0.1 1.2).4 r.4 |"
     )
 
 
@@ -49,7 +49,7 @@ def test_to_alphatex_escapes_title_quotes_backslashes_and_controls() -> None:
 def test_to_alphatex_separates_multiple_bars() -> None:
     bar = {"beats": [{"duration": 1, "notes": [{"string": 6, "fret": 5}]}]}
     tex = to_alphatex(Score.model_validate(_score(bars=[bar, bar])), title="x")
-    assert tex.endswith("\\ts 4 4 5.6.1 | 5.6.1 |")
+    assert tex.endswith("\\ts (4 4) 5.6.1 | 5.6.1 |")
 
 
 @pytest.mark.parametrize(("midi", "name"), [(64, "E4"), (40, "E2"), (61, "C#4"), (0, "C-1")])

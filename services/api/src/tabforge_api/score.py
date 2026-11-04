@@ -86,7 +86,9 @@ def _beat(beat: ScoreBeat) -> str:
 
 def to_alphatex(score: Score, title: str) -> str:
     tuning = " ".join(midi_to_note_name(m) for m in score.tuning)
-    header = f"\\title {_string_literal(title)} \\tempo {score.tempo_bpm} \\tuning {tuning} ."
+    # Multi-argument metadata in parentheses and no "." separator: the alphaTab 1.9 syntax
+    # that its parser accepts without diagnostics (older forms raise AT301/AT400 warnings).
+    header = f"\\title {_string_literal(title)} \\tempo {score.tempo_bpm} \\tuning ({tuning})"
     numerator, denominator = score.time_signature
     bars = " ".join(" ".join(_beat(b) for b in bar.beats) + " |" for bar in score.bars)
-    return f"{header}\n\\ts {numerator} {denominator} {bars}"
+    return f"{header}\n\\ts ({numerator} {denominator}) {bars}"
