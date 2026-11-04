@@ -1,0 +1,67 @@
+[project]
+name = "tabforge-worker"
+version = "0.1.0"
+description = "TabForge transcription worker (audio -> guitar tab)"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "pydantic>=2.8",
+]
+
+[project.optional-dependencies]
+# Heavy ML stack, installed only in the worker image / M0 spike. See docs/adr/0002.
+ml = [
+  "demucs==4.1.0",
+  "basic-pitch==0.4.0",
+  # Basic Pitch runs on its bundled ONNX model (nmp.onnx); TensorFlow is excluded below.
+  "onnxruntime>=1.20",
+  "librosa>=0.10",
+  # Floor: torch<2.6 has a torch.load RCE even with weights_only=True (CVE-2025-32434).
+  "torch>=2.6",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "ruff>=0.6",
+  "mypy>=1.11",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tabforge_worker"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "N", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.mypy]
+strict = true
+python_version = "3.13"
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.uv]
+# Worker runs only in Linux containers. Without this, a demucs constraint for
+# macOS x86_64 (torch<2.3) forces an outdated torch on every platform.
+environments = ["sys_platform == 'linux'"]
+# basic-pitch 0.4.0 hard-requires tensorflow<2.15.1, which pulls keras 2.15 and
+# protobuf 4.25 with unfixed advisories. We use the ONNX backend instead, so the
+# marker below makes the tensorflow requirement never apply. Verified 2026-11-04:
+# ONNX inference works on Python 3.13 / numpy 2 without tensorflow installed.
+# basic-pitch also pins resampy<0.4.3, whose pkg_resources import forces a vulnerable
+# setuptools<81; resampy 0.4.3 drops it and was verified with the same ONNX inference.
+override-dependencies = [
+  "tensorflow; sys_platform == 'never'",
+  "resampy>=0.4.3",
+]

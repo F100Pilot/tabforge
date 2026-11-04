@@ -1,0 +1,34 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Audio, models, eval data (never commit copyrighted audio)
+*.wav
+*.mp3
+*.flac
+*.ogg
+/models/
+/data/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
