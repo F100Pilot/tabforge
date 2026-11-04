@@ -62,6 +62,7 @@ erDiagram
   AUDIO_ASSET ||--o{ JOB : processed_by
   JOB ||--o| TAB : produces
   TAB ||--o{ TAB_REVISION : has
+  TAB ||--o| TAB_REFERENCE : compared_with
   USER ||--o{ SESSION : has
   USER { uuid id; text email; timestamptz created_at; timestamptz deleted_at }
   SESSION { uuid id; uuid user_id; text token_hash; text csrf_token; timestamptz expires_at }
@@ -70,6 +71,7 @@ erDiagram
   JOB { uuid id; uuid audio_id; text status; text stage; int attempts; text error_code; timestamptz locked_at; uuid tab_id }
   TAB { uuid id; uuid owner_id; text title; text tuning; text visibility; uuid current_revision_id }
   TAB_REVISION { uuid id; uuid tab_id; jsonb score; text source; timestamptz created_at }
+  TAB_REFERENCE { uuid id; uuid tab_id; text filename; text track; jsonb notes; timestamptz created_at }
 ```
 
 - `AUDIO_ASSET.status`: `pending_upload | uploaded | rejected`; `source_kind`: `mix | guitar_stem` (escolha do utilizador no upload).
@@ -79,6 +81,7 @@ erDiagram
 - Schema: migrações Alembic em `services/api/migrations` (a API é dona do schema; o worker usa SQL via psycopg).
 - `TAB.visibility`: `private` (default) `| unlisted | public` (public desativado até ADR-0003 ser fechado).
 - `TAB_REVISION` imutável; `source`: `ai | user`.
+- `TAB_REFERENCE` (ADR-0009): no máximo uma por tab (`tab_id` único); `notes` é uma lista JSONB de `{onset (semínimas), pitch, string (1 = mais aguda), fret, bar}`. Só ficam as notas, nunca o ficheiro Guitar Pro. Apaga-se em cascata com a tab.
 - `LOGIN_TOKEN` e `SESSION` (US-07, ADR-0006) guardam só o SHA-256 do segredo. `SESSION` e todo o conteúdo do utilizador apagam-se em cascata com `USER`; `LOGIN_TOKEN` não tem FK (existe antes do utilizador) e é apagado pelo email. O worker remove os expirados de hora a hora.
 
 ## Contrato de API (rascunho)
@@ -95,6 +98,10 @@ erDiagram
 | `GET` | `/v1/jobs/{id}` | Estado + etapa |
 | `GET` | `/v1/tabs/{id}` | Tab + revisão atual (score) + alphaTex gerado no servidor |
 | `POST` | `/v1/tabs/{id}/revisions` | Nova revisão (edição) |
+| `PUT` | `/v1/tabs/{id}/reference` | Só do dono. Guarda a tab certa como notas (ADR-0009): `{filename, track, notes: [{onset, pitch, string, fret, bar}]}` (1–20 000 notas, corpo ≤ 2 MB); substitui a anterior → 200 `{filename, track, notes, created_at}`; 413/422 |
+| `GET` | `/v1/tabs/{id}/reference` | Resumo da tab certa; 404 `reference_not_found` |
+| `DELETE` | `/v1/tabs/{id}/reference` | 204 (idempotente) |
+| `GET` | `/v1/tabs/{id}/comparison` | Compara a revisão atual com a tab certa: deslocamento, escala, recall, precision, F1, posição correta, erro de ataque e resultados por compasso; 404 `reference_not_found` |
 | `GET` | `/health`, `/ready` | Liveness / readiness |
 | `POST` | `/v1/auth/desktop` | Só `env=desktop` (senão 404): `{token}` → 200 `{user, csrf_token}` + cookie de sessão; 403 `invalid_launch_token`; 429 `rate_limited` (10/min por IP) |
 | `PUT` | `/v1/local-storage/{key}` | Só com storage `local`: upload assinado (`expires`, `sig`) → 200 sem corpo; 403 `invalid_signature`/`upload_url_expired`; 400 `invalid_key`/`upload_size_mismatch`; 411 `length_required` |

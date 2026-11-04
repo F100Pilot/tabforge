@@ -18,13 +18,17 @@ router = APIRouter(prefix="/v1/tabs", tags=["tabs"])
 MAX_REVISION_BYTES = 1_000_000  # a 2000-bar score is well under this
 
 
-async def _limit_body(request: Request) -> None:
+async def enforce_body_limit(request: Request, limit: int) -> None:
     """Refuse oversized bodies before they are parsed (memory exhaustion)."""
     declared = request.headers.get("content-length")
-    if declared is not None and declared.isdigit() and int(declared) > MAX_REVISION_BYTES:
-        raise ProblemError(413, "payload_too_large", f"maximum body is {MAX_REVISION_BYTES} bytes")
-    if len(await request.body()) > MAX_REVISION_BYTES:
-        raise ProblemError(413, "payload_too_large", f"maximum body is {MAX_REVISION_BYTES} bytes")
+    if declared is not None and declared.isdigit() and int(declared) > limit:
+        raise ProblemError(413, "payload_too_large", f"maximum body is {limit} bytes")
+    if len(await request.body()) > limit:
+        raise ProblemError(413, "payload_too_large", f"maximum body is {limit} bytes")
+
+
+async def _limit_body(request: Request) -> None:
+    await enforce_body_limit(request, MAX_REVISION_BYTES)
 
 
 class RevisionOut(BaseModel):
@@ -79,9 +83,7 @@ def list_tabs(
     )
 
 
-def _owned_tab(
-    session: SessionDep, user: CurrentUser, tab_id: uuid.UUID, lock: bool = False
-) -> Tab:
+def owned_tab(session: SessionDep, user: CurrentUser, tab_id: uuid.UUID, lock: bool = False) -> Tab:
     query = select(Tab).where(Tab.id == tab_id, Tab.owner_id == user.id)
     tab = session.execute(query.with_for_update() if lock else query).scalar_one_or_none()
     if tab is None:
@@ -154,7 +156,7 @@ def create_revision(
     tab_id: uuid.UUID, body: RevisionCreate, user: CurrentUser, session: SessionDep
 ) -> TabOut:
     """Save an edit as a new immutable revision and make it current (US-04)."""
-    tab = _owned_tab(session, user, tab_id, lock=True)
+    tab = owned_tab(session, user, tab_id, lock=True)
     if tab.current_revision_id != body.base_revision_id:
         raise ProblemError(
             409, "revision_conflict", "the tab changed since it was opened; reload before saving"
@@ -184,13 +186,13 @@ def preview(
 ) -> PreviewOut:
     """alphaTex for an edited, unsaved score: the editor re-renders from this, so alphaTex is
     still only ever generated server-side from a validated Score (threat model T5)."""
-    tab = _owned_tab(session, user, tab_id)
+    tab = owned_tab(session, user, tab_id)
     return PreviewOut(alphatex=to_alphatex(body.score, tab.title))
 
 
 @router.get("/{tab_id}/revisions")
 def list_revisions(tab_id: uuid.UUID, user: CurrentUser, session: SessionDep) -> RevisionList:
-    tab = _owned_tab(session, user, tab_id)
+    tab = owned_tab(session, user, tab_id)
     rows = session.execute(
         select(TabRevision.id, TabRevision.source, TabRevision.created_at)
         .where(TabRevision.tab_id == tab.id)
@@ -203,7 +205,7 @@ def list_revisions(tab_id: uuid.UUID, user: CurrentUser, session: SessionDep) ->
 def get_revision(
     tab_id: uuid.UUID, revision_id: uuid.UUID, user: CurrentUser, session: SessionDep
 ) -> RevisionOut:
-    tab = _owned_tab(session, user, tab_id)
+    tab = owned_tab(session, user, tab_id)
     revision = session.execute(
         select(TabRevision).where(TabRevision.id == revision_id, TabRevision.tab_id == tab.id)
     ).scalar_one_or_none()

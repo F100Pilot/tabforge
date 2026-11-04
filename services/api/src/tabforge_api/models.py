@@ -156,6 +156,21 @@ class TabRevision(Base):
     __table_args__ = (CheckConstraint(_in("source", REVISION_SOURCES), name="source"),)
 
 
+class TabReference(Base):
+    """The correct tab of the same song, reduced to note events (ADR-0009). One per tab."""
+
+    __tablename__ = "tab_references"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    tab_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tabs.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    filename: Mapped[str] = mapped_column(Text, nullable=False)
+    track: Mapped[str] = mapped_column(Text, nullable=False)
+    notes: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = _created_at()
+
+
 class Job(Base):
     __tablename__ = "jobs"
 
