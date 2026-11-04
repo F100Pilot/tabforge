@@ -14,12 +14,12 @@
 
 ## M1 — Walking skeleton
 - [x] Monorepo, CI, docker-compose (Postgres, MinIO)
-- [ ] API: migrações iniciais (users, audio_assets, jobs, tabs, tab_revisions)
-- [ ] Upload pré-assinado + validação (US-01)
-- [ ] Worker: loop de fila SKIP LOCKED com etapas stub; etapa de separação só para input em mistura (stem isolada salta o Demucs, ADR-0002)
+- [x] API: migrações iniciais (users, audio_assets, jobs, tabs, tab_revisions)
+- [x] Upload pré-assinado + validação (US-01): tipo/tamanho (413/415) e magic bytes; duração passa para o worker no M2 (ver architecture.md)
+- [x] Worker: loop de fila SKIP LOCKED com etapas stub; etapa de separação só para input em mistura (stem isolada salta o Demucs, ADR-0002)
 - [x] Teste de integração: inferência Basic Pitch ONNX real num clip sintético (guarda os overrides do ADR-0002) — feito no M0
-- [ ] Web: página que renderiza um alphaTex fixo com playback (US-03 parcial)
-- [ ] Fluxo ponta-a-ponta com pipeline stub
+- [x] Web: página que renderiza o alphaTex da API com playback e velocidade 25–150% (US-03 parcial; falta loop de secção)
+- [x] Fluxo ponta-a-ponta com pipeline stub, verificado no Chromium contra API, worker e S3 reais. Automatizar em CI fica no item E2E Playwright do M2
 
 ## M2 — MVP
 - [ ] Wireframes (upload, progresso, viewer, editor) aprovados antes de começar a UI do M2 (Fase 2 do SDLC)
