@@ -22,6 +22,9 @@ WEB_ENV = {
     "NEXT_TELEMETRY_DISABLED": "1",
     "COREPACK_ENABLE_DOWNLOAD_PROMPT": "0",
 }
+# Flat node_modules (no symlinks): copying pnpm's symlinked layout dereferences it, and next then
+# cannot find its own dependencies (e.g. @swc/helpers) from the copied folder.
+PNPM_FLAT = ["--config.node-linker=hoisted", "--config.confirm-modules-purge=false"]
 # Download name -> file that proves it is already in the bundle.
 DOWNLOADS = {
     "node": BUNDLE / "node" / "node.exe",
@@ -77,7 +80,7 @@ def ensure_web() -> None:
     node_dir = BUNDLE / "node"
     env = {**WEB_ENV, "PATH": f"{node_dir}{os.pathsep}{os.environ.get('PATH', '')}"}
     corepack = str(node_dir / "corepack.cmd")
-    run([corepack, "pnpm", "install", "--frozen-lockfile"], WEB, env)
+    run([corepack, "pnpm", "install", "--frozen-lockfile", *PNPM_FLAT], WEB, env)
     run([corepack, "pnpm", "build"], WEB, env)
     target = BUNDLE / "web"
     shutil.rmtree(target, ignore_errors=True)
