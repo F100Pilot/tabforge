@@ -11,8 +11,8 @@ from tabforge_desktop.paths import DataLayout, executable
 class Ports:
     """Loopback ports chosen at each start, so another program on a fixed port cannot block us.
 
-    Only the web origin is used by the window: the web server forwards /v1 to the API
-    (apps/web/src/proxy.ts), so uploads and the session cookie stay on one origin.
+    The window uses the web origin: the web server forwards /v1 to the API (apps/web/src/proxy.ts),
+    so the session cookie stays on one origin. Only the signed audio PUT goes to the API port.
     """
 
     web: int
@@ -80,8 +80,9 @@ def service_env(
         "TABFORGE_LOCAL_STORAGE_DIR": str(data.audio),
         "TABFORGE_DESKTOP_LAUNCH_TOKEN": launch_token,
         "TABFORGE_LOCAL_UPLOAD_SECRET": upload_secret,
-        # Signed upload URLs point at the web origin; the web proxies them to the API.
-        "TABFORGE_API_PUBLIC_URL": ports.web_url,
+        # Signed upload URLs go straight to the API (CORS allows PUT from the web origin):
+        # Next's proxy buffers request bodies and cuts them at 10 MB, too small for audio.
+        "TABFORGE_API_PUBLIC_URL": ports.api_url,
         "TABFORGE_WEB_BASE_URL": ports.web_url,
         # Plain HTTP on 127.0.0.1: a Secure cookie would never be sent back.
         "TABFORGE_SESSION_COOKIE_SECURE": "false",

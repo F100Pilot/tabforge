@@ -20,8 +20,8 @@ def test_service_env_is_desktop_local_only(tmp_path: Path) -> None:
     assert env["TABFORGE_STORAGE_BACKEND"] == "local"
     assert env["TABFORGE_LOCAL_STORAGE_DIR"] == str(tmp_path / "data" / "audio")
     assert json.loads(env["TABFORGE_CORS_ORIGINS"]) == ["http://127.0.0.1:50001"]
-    # Uploads go to the web origin, which proxies /v1 to the API.
-    assert env["TABFORGE_API_PUBLIC_URL"] == "http://127.0.0.1:50001"
+    # Signed audio uploads go straight to the API: Next's proxy cuts bodies at 10 MB.
+    assert env["TABFORGE_API_PUBLIC_URL"] == "http://127.0.0.1:50002"
     assert env["TABFORGE_SESSION_COOKIE_SECURE"] == "false"
     assert env["HF_HUB_OFFLINE"] == "1"
     assert env["HF_HOME"].startswith(str(tmp_path / "bundle"))
