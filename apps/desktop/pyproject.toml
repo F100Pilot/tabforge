@@ -15,6 +15,8 @@ dependencies = [
 # Installed only for the Windows bundle (PyInstaller). Linux tests run without it.
 bundle = [
   "tabforge-worker[ml]",
+  # Direct so that [tool.uv.sources] can pick the CUDA index on Windows. Floor: CVE-2025-32434.
+  "torch>=2.6",
   "pywebview>=6.2,<7",
 ]
 
@@ -32,9 +34,17 @@ build = [
 ]
 
 [tool.uv.sources]
+# Windows: CUDA build of torch (RTX 4080 SUPER, Ada sm_89); falls back to CPU without a usable
+# NVIDIA driver. Linux (tests only) keeps PyPI. ADR-0008.
+torch = [{ index = "pytorch-cu132", marker = "sys_platform == 'win32'" }]
 tabforge-api = { path = "../../services/api" }
 tabforge-worker = { path = "../../services/worker" }
 tabforge-score = { path = "../../packages/score" }
+
+[[tool.uv.index]]
+name = "pytorch-cu132"
+url = "https://download.pytorch.org/whl/cu132"
+explicit = true
 
 [build-system]
 requires = ["hatchling"]
@@ -69,8 +79,8 @@ markers = [
 ]
 
 [tool.uv]
-# Desktop builds for Windows; Linux only for tests in CI. The ML stack (bundle extra) resolves
-# torch from PyPI, whose Windows wheels are CPU-only (ADR-0008).
+# Desktop builds for Windows; Linux only for tests in CI. The ML stack (bundle extra) takes
+# torch+cu132 on Windows from the PyTorch index (see [tool.uv.sources]).
 environments = ["sys_platform == 'win32'", "sys_platform == 'linux'"]
 # Same overrides as services/worker (ADR-0002): no TensorFlow, resampy without pkg_resources.
 override-dependencies = [
