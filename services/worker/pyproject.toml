@@ -61,7 +61,7 @@ mypy_path = "src"
 
 # Untyped (no py.typed) or absent in the fast CI env, which installs no extras.
 [[tool.mypy.overrides]]
-module = ["basic_pitch.*", "mir_eval.*", "demucs.*", "torch.*", "numpy.*", "soundfile.*"]
+module = ["basic_pitch.*", "mir_eval.*", "demucs.*", "torch.*", "numpy.*", "soundfile.*", "librosa.*", "boto3.*", "botocore.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

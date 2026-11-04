@@ -5,12 +5,37 @@ import psycopg
 import pytest
 
 from tabforge_worker import queue
-from tabforge_worker.pipeline import STUB_SCORE, Stage
+from tabforge_worker.pipeline import (
+    STUB_SCORE,
+    PipelineError,
+    PipelineResult,
+    Stage,
+    StageCallback,
+    StubPipeline,
+    plan_stages,
+)
 from tabforge_worker.worker import WorkerConfig, run_once
 
 pytestmark = pytest.mark.db
 
 Conn = psycopg.Connection[Any]
+
+
+class RecordingPipeline:
+    """Reports the planned stages, optionally failing at one of them."""
+
+    def __init__(self, fail_at: Stage | None = None, error: Exception | None = None) -> None:
+        self.seen: list[Stage] = []
+        self.fail_at = fail_at
+        self.error = error or RuntimeError("model crashed")
+
+    def process(self, job: queue.ClaimedJob, on_stage: StageCallback) -> PipelineResult:
+        for stage in plan_stages(job.source_kind):
+            on_stage(stage)
+            self.seen.append(stage)
+            if stage is self.fail_at:
+                raise self.error
+        return PipelineResult(STUB_SCORE, duration_ms=1234, sha256="ab" * 32)
 
 
 def _user(conn: Conn) -> uuid.UUID:
@@ -103,43 +128,53 @@ def test_job_over_attempt_limit_fails(conn: Conn) -> None:
 @pytest.mark.parametrize(
     ("source_kind", "expected"),
     [
-        ("guitar_stem", [Stage.TRANSCRIBING, Stage.ARRANGING]),
-        ("mix", [Stage.SEPARATING, Stage.TRANSCRIBING, Stage.ARRANGING]),
+        ("guitar_stem", [Stage.NORMALIZING, Stage.TRANSCRIBING, Stage.ARRANGING]),
+        ("mix", [Stage.NORMALIZING, Stage.SEPARATING, Stage.TRANSCRIBING, Stage.ARRANGING]),
     ],
 )
 def test_run_once_runs_planned_stages_and_stores_tab(
     conn: Conn, database_url: str, source_kind: str, expected: list[Stage]
 ) -> None:
     job_id = _job(conn, source_kind)
-    seen: list[Stage] = []
+    pipeline = RecordingPipeline()
 
-    assert run_once(conn, WorkerConfig(database_url), lambda stage, _: seen.append(stage))
+    assert run_once(conn, WorkerConfig(database_url), pipeline)
 
-    assert seen == expected
+    assert pipeline.seen == expected
     status, stage, attempts, error, tab_id = _job_row(conn, job_id)
     assert (status, stage, attempts, error) == ("done", "arranging", 1, None)
     tab = conn.execute(
-        "SELECT t.owner_id = a.user_id, t.visibility, r.source, r.score "
+        "SELECT t.owner_id = a.user_id, t.visibility, r.source, r.score, a.duration_ms, a.sha256 "
         "FROM tabs t JOIN tab_revisions r ON r.id = t.current_revision_id "
         "JOIN jobs j ON j.tab_id = t.id JOIN audio_assets a ON a.id = j.audio_id "
         "WHERE t.id = %s",
         (tab_id,),
     ).fetchone()
-    assert tab == (True, "private", "ai", STUB_SCORE)
+    assert tab == (True, "private", "ai", STUB_SCORE, 1234, "ab" * 32)
+
+
+def test_claim_returns_storage_key_and_type(conn: Conn) -> None:
+    _job(conn)
+    job = queue.claim_next(conn, lease_s=600, max_attempts=3)
+    assert job is not None
+    assert job.storage_key.startswith("audio/")
+    assert job.content_type == "audio/wav"
 
 
 def test_stage_error_marks_job_failed_with_stage_code(conn: Conn, database_url: str) -> None:
     job_id = _job(conn, "mix")
-
-    def boom(stage: Stage, _: queue.ClaimedJob) -> None:
-        if stage is Stage.TRANSCRIBING:
-            raise RuntimeError("model crashed")
-
-    assert run_once(conn, WorkerConfig(database_url), boom)
+    assert run_once(conn, WorkerConfig(database_url), RecordingPipeline(Stage.TRANSCRIBING))
     status, stage, _, error, tab_id = _job_row(conn, job_id)
     assert (status, stage, error, tab_id) == ("failed", "transcribing", "transcribing_failed", None)
     assert conn.execute("SELECT count(*) FROM tabs").fetchone() == (0,)
 
 
+def test_pipeline_error_code_is_stored(conn: Conn, database_url: str) -> None:
+    job_id = _job(conn)
+    pipe = RecordingPipeline(Stage.NORMALIZING, PipelineError("audio_too_long"))
+    assert run_once(conn, WorkerConfig(database_url), pipe)
+    assert _job_row(conn, job_id)[0::3] == ("failed", "audio_too_long")
+
+
 def test_run_once_on_empty_queue_returns_false(conn: Conn, database_url: str) -> None:
-    assert run_once(conn, WorkerConfig(database_url)) is False
+    assert run_once(conn, WorkerConfig(database_url), StubPipeline()) is False

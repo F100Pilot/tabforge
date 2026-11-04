@@ -30,7 +30,7 @@ NAMING = {
 AUDIO_STATUSES = ("pending_upload", "uploaded", "rejected")
 AUDIO_SOURCE_KINDS = ("mix", "guitar_stem")
 JOB_STATUSES = ("queued", "running", "done", "failed")
-JOB_STAGES = ("separating", "transcribing", "arranging")
+JOB_STAGES = ("normalizing", "separating", "transcribing", "arranging")
 TAB_VISIBILITIES = ("private", "unlisted", "public")
 REVISION_SOURCES = ("ai", "user")
 

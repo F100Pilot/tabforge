@@ -49,7 +49,8 @@ flowchart LR
 ```
 
 - Etapas `B–E` são modelos de terceiros atrás de interfaces (`Separator`, `Transcriber`, `BeatTracker`) → substituíveis.
-- Etapas `F–G` são **domínio próprio**, deterministas, com TDD (onde está o diferencial).
+- Etapas `F–G` são **domínio próprio**, deterministas, com TDD (onde está o diferencial): `services/worker/src/tabforge_worker/arrange/` (quantização em grelha de 12 ticks/batida, Viterbi corda/traste, layout para Score v2). Resultados em `docs/eval/M2-arranging.md`.
+- O worker escolhe o pipeline por `TABFORGE_WORKER_PIPELINE` (`stub` sem ML, `real` com o extra `ml`).
 - Upload de stem já isolada (opção do utilizador) salta a etapa `C`.
 
 ## Modelo de dados (inicial)
@@ -69,7 +70,8 @@ erDiagram
 ```
 
 - `AUDIO_ASSET.status`: `pending_upload | uploaded | rejected`; `source_kind`: `mix | guitar_stem` (escolha do utilizador no upload).
-- `JOB.status`: `queued | running | done | failed`; `stage`: `separating | transcribing | arranging`. `guitar_stem` salta `separating` (ADR-0002, decisão M0).
+- `JOB.status`: `queued | running | done | failed`; `stage`: `normalizing | separating | transcribing | arranging`. `guitar_stem` salta `separating` (ADR-0002, decisão M0).
+- Códigos de erro do job: `audio_too_long` (> 10 min), `audio_unreadable` (ffmpeg não lê o ficheiro no formato declarado), `<etapa>_failed` (erro interno nessa etapa), `max_attempts_exceeded`.
 - Fila: o worker reclama o job `queued` mais antigo (ou `running` com lease expirado) com `FOR UPDATE SKIP LOCKED`; cada etapa renova `locked_at`. Acima de 3 tentativas o job falha com `max_attempts_exceeded`; erro numa etapa → `failed` com `<etapa>_failed`.
 - Schema: migrações Alembic em `services/api/migrations` (a API é dona do schema; o worker usa SQL via psycopg).
 - `TAB.visibility`: `private` (default) `| unlisted | public` (public desativado até ADR-0003 ser fechado).
@@ -93,7 +95,8 @@ OpenAPI gerado automaticamente pelo FastAPI (`/openapi.json`) é a fonte de verd
 
 - Tipo e tamanho declarados validados ao criar o upload (415/413); o URL pré-assinado assina ambos, por isso o storage rejeita outro conteúdo (403).
 - Ao completar: tamanho real (HEAD) e magic bytes (GET com `Range`, 12 bytes). A API nunca descodifica áudio (T1).
-- **Duração (≤ 10 min) é verificada no worker** (etapa de normalização, M2, ffprobe no container isolado), não na API: obrigaria a API a descodificar input não confiável. Consequência: um ficheiro longo devolve `failed` com `audio_too_long` no job, em vez de 413 no upload. Desvio ao critério de US-01, registado aqui.
+- **Duração (≤ 10 min) é verificada no worker** (etapa `normalizing`, ffprobe), não na API: obrigaria a API a descodificar input não confiável. Consequência: um ficheiro longo devolve `failed` com `audio_too_long` no job, em vez de 413 no upload. Desvio ao critério de US-01, registado aqui.
+- ffmpeg/ffprobe correm com o demuxer forçado pelo tipo declarado (já validado pelos magic bytes), só o protocolo `file` e timeouts (`services/worker/src/tabforge_worker/media.py`).
 
 ### Autenticação no M1
 

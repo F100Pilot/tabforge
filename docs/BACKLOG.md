@@ -26,9 +26,9 @@
 - [ ] Tema da pauta claro/escuro à escolha do utilizador (preferência guardada; por defeito segue o tema da interface). alphaTab 1.9 `display.resources`, paletas validadas no render dos wireframes:
   - escura: fundo `#14171C`, mainGlyph `#E6E8EB`, secondaryGlyph `#9AA1AC`, staffLine `#4A505B`, barSeparator `#8A919C`, barNumber `#F2B544`, scoreInfo `#C9CED6`
   - clara: fundo `#FAFAF7`, mainGlyph `#1B1D21`, secondaryGlyph `#6B7079`, staffLine `#A3A39B`, barSeparator `#4A4E55`, barNumber `#9A6A12`, scoreInfo `#1B1D21`
-- [ ] Domínio: quantização rítmica (TDD), a partir de onsets e beats, sem depender de offsets do Basic Pitch (M0: F1 com offset de 0,55)
-- [ ] Domínio: atribuição corda/traste Viterbi (TDD)
-- [ ] Integração Demucs/Basic Pitch/librosa no worker (US-02)
+- [x] Domínio: quantização rítmica (TDD), a partir de onsets e beats, sem depender de offsets do Basic Pitch (M0: F1 com offset de 0,55)
+- [x] Domínio: atribuição corda/traste Viterbi (TDD) — 65,7% exato em guitaristas de teste do GuitarSet (`docs/eval/M2-arranging.md`)
+- [x] Integração Demucs/Basic Pitch/librosa no worker (US-02), com etapa `normalizing` (ffmpeg, limite de 10 min)
 - [ ] Auth email + Google, eliminação de conta (US-07)
 - [ ] Editor de tab com revisões (US-04)
 - [ ] Quotas, rate limiting, retenção de áudio
