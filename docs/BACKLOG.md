@@ -31,7 +31,7 @@
 - [x] Integração Demucs/Basic Pitch/librosa no worker (US-02), com etapa `normalizing` (ffmpeg, limite de 10 min)
 - [ ] Auth email + Google, eliminação de conta (US-07)
 - [ ] Editor de tab com revisões (US-04)
-- [ ] Quotas, rate limiting, retenção de áudio
+- [x] Quotas, rate limiting, retenção de áudio — 20 uploads/24 h, 30 escritas/min por utilizador (em memória, uma instância), worker apaga áudio expirado (30 dias) e uploads abandonados (>1 dia)
 - [ ] E2E Playwright: upload → tab → editar
 
 ## M3 — Iterações

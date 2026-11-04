@@ -27,7 +27,7 @@ NAMING = {
     "pk": "pk_%(table_name)s",
 }
 
-AUDIO_STATUSES = ("pending_upload", "uploaded", "rejected")
+AUDIO_STATUSES = ("pending_upload", "uploaded", "rejected", "expired")
 AUDIO_SOURCE_KINDS = ("mix", "guitar_stem")
 JOB_STATUSES = ("queued", "running", "done", "failed")
 JOB_STAGES = ("normalizing", "separating", "transcribing", "arranging")

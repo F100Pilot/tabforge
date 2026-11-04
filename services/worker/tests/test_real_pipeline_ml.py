@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 from tabforge_score import Score
+from test_basic_pitch_onnx import A4_HZ, E4_HZ, _write_tone_sequence
 
 from tabforge_worker.queue import ClaimedJob
-from test_basic_pitch_onnx import A4_HZ, E4_HZ, _write_tone_sequence
 
 pytestmark = [
     pytest.mark.ml,

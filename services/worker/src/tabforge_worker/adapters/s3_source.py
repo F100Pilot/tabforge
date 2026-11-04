@@ -27,3 +27,6 @@ class S3AudioSource:
 
     def download(self, key: str, dst: Path) -> None:
         self._client.download_file(self._bucket, key, str(dst))
+
+    def delete(self, key: str) -> None:
+        self._client.delete_object(Bucket=self._bucket, Key=key)

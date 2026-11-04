@@ -12,7 +12,7 @@ from typing import Any, Literal
 
 import psycopg
 
-from tabforge_worker import queue
+from tabforge_worker import queue, retention
 from tabforge_worker.pipeline import Pipeline, PipelineError, Stage, StubPipeline
 
 log = logging.getLogger("tabforge_worker")
@@ -25,6 +25,7 @@ class WorkerConfig:
     lease_s: int = 600
     max_attempts: int = 3
     pipeline: Literal["stub", "real"] = "stub"
+    retention_interval_s: float = 3600.0
 
     @classmethod
     def from_env(cls) -> "WorkerConfig":
@@ -37,6 +38,7 @@ class WorkerConfig:
             lease_s=int(os.environ.get("TABFORGE_WORKER_LEASE_S", "600")),
             max_attempts=int(os.environ.get("TABFORGE_WORKER_MAX_ATTEMPTS", "3")),
             pipeline=_pipeline_kind(os.environ.get("TABFORGE_WORKER_PIPELINE", "stub")),
+            retention_interval_s=float(os.environ.get("TABFORGE_WORKER_RETENTION_S", "3600")),
         )
 
 
@@ -112,6 +114,10 @@ def main() -> int:
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT, _stop)
     pipeline = build_pipeline(config.pipeline)
+    from tabforge_worker.adapters.s3_source import S3AudioSource
+
+    store = S3AudioSource.from_env()
+    next_purge = 0.0
     log.info(
         _event(
             "worker_started",
@@ -124,6 +130,10 @@ def main() -> int:
         try:
             with psycopg.connect(config.database_url, autocommit=True) as conn:
                 while not stopping:
+                    if time.monotonic() >= next_purge:
+                        purged = retention.purge_expired(conn, store)
+                        log.info(_event("retention_run", purged=purged))
+                        next_purge = time.monotonic() + config.retention_interval_s
                     if not run_once(conn, config, pipeline):
                         time.sleep(config.poll_interval_s)
         except psycopg.OperationalError:
