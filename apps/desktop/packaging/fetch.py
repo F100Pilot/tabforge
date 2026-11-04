@@ -22,6 +22,10 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+class UnpinnedError(Exception):
+    pass
+
+
 def fetch(name: str, spec: dict[str, object], out: Path, work: Path) -> None:
     url = str(spec["url"])
     archive = work / f"{name}.zip"
@@ -30,7 +34,7 @@ def fetch(name: str, spec: dict[str, object], out: Path, work: Path) -> None:
     actual = sha256(archive)
     expected = spec.get("sha256")
     if expected is None:
-        sys.exit(f"{name}: sha256 not pinned; downloaded file has sha256 {actual}")
+        raise UnpinnedError(f"{name}: sha256 not pinned; downloaded file has sha256 {actual}")
     if actual != expected:
         sys.exit(f"{name}: sha256 mismatch: expected {expected}, got {actual}")
     extract = work / name
@@ -64,11 +68,17 @@ def main() -> None:
         if not k.startswith("_")
     }
     args.out.mkdir(parents=True, exist_ok=True)
+    unpinned: list[str] = []
     with tempfile.TemporaryDirectory() as tmp:
         for name, spec in specs.items():
             if args.only and name not in args.only:
                 continue
-            fetch(name, spec, args.out, Path(tmp))
+            try:
+                fetch(name, spec, args.out, Path(tmp))
+            except UnpinnedError as exc:  # report every missing pin in one run
+                unpinned.append(str(exc))
+    if unpinned:
+        sys.exit("\n".join(unpinned))
 
 
 if __name__ == "__main__":
