@@ -72,6 +72,17 @@ jobs:
           $env:HF_HOME = "$PWD\build\bundle\models\hf"
           uv run python -c "from demucs.pretrained import get_model; get_model('htdemucs_6s')"
 
+      - name: Smoke test from source (start.bat, as used for local testing)
+        shell: cmd
+        run: |
+          set TABFORGE_DATA_DIR=%RUNNER_TEMP%\tabforge-src-data
+          call start.bat --smoke
+          if errorlevel 1 (
+            type "%TABFORGE_DATA_DIR%\logs\tabforge.log"
+            exit /b 1
+          )
+          findstr /c:"smoke_ok" "%TABFORGE_DATA_DIR%\logs\tabforge.log"
+
       - name: PyInstaller
         working-directory: apps/desktop
         run: uv run pyinstaller packaging/tabforge.spec --noconfirm
