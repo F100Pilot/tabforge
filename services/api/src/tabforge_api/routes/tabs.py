@@ -7,11 +7,11 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import select
+from tabforge_score import Score, to_alphatex
 
 from tabforge_api.deps import CurrentUser, SessionDep
 from tabforge_api.models import Tab, TabRevision
 from tabforge_api.problems import ProblemError
-from tabforge_api.score import Score, to_alphatex
 
 router = APIRouter(prefix="/v1/tabs", tags=["tabs"])
 

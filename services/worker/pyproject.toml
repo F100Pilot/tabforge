@@ -4,8 +4,10 @@ version = "0.1.0"
 description = "TabForge transcription worker (audio -> guitar tab)"
 requires-python = ">=3.13,<3.14"
 dependencies = [
+  "boto3>=1.43,<2",
   "psycopg[binary]>=3.3,<4",
   "pydantic>=2.8",
+  "tabforge-score>=0.2.0",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +32,10 @@ dev = [
   "ruff>=0.6",
   "mypy>=1.11",
 ]
+
+[tool.uv.sources]
+# Shared score format (ADR-0005). Docker builds use the repository root as context.
+tabforge-score = { path = "../../packages/score" }
 
 [build-system]
 requires = ["hatchling"]

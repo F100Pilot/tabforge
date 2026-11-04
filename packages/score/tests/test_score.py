@@ -3,7 +3,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from tabforge_api.score import Score, midi_to_note_name, to_alphatex
+from tabforge_score import Score, midi_to_note_name, to_alphatex
 
 
 def _score(**overrides: Any) -> dict[str, Any]:
@@ -99,7 +99,7 @@ def test_note_bounds(note: dict[str, int]) -> None:
 @pytest.mark.parametrize(
     "overrides",
     [
-        {"schema_version": 2},
+        {"schema_version": 3},
         {"tempo_bpm": 0},
         {"tuning": [64, 59, 55, 50, 45]},
         {"tuning": [64, 59, 55, 50, 45, 128]},

@@ -628,6 +628,7 @@ dependencies = [
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic-settings" },
     { name = "sqlalchemy" },
+    { name = "tabforge-score" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -647,12 +648,31 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3,<4" },
     { name = "pydantic-settings", specifier = ">=2.4" },
     { name = "sqlalchemy", specifier = ">=2.1,<2.2" },
+    { name = "tabforge-score", directory = "../../packages/score" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "httpx", specifier = ">=0.27" },
+    { name = "mypy", specifier = ">=1.11" },
+    { name = "pytest", specifier = ">=8" },
+    { name = "ruff", specifier = ">=0.6" },
+]
+
+[[package]]
+name = "tabforge-score"
+version = "0.2.0"
+source = { directory = "../../packages/score" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.8" }]
+
+[package.metadata.requires-dev]
+dev = [
     { name = "mypy", specifier = ">=1.11" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.6" },

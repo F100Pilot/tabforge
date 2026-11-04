@@ -123,3 +123,4 @@ OpenAPI gerado automaticamente pelo FastAPI (`/openapi.json`) é a fonte de verd
 - [ADR-0002](adr/0002-pipeline-transcricao.md) — Pipeline de transcrição e isolamento do worker
 - [ADR-0003](adr/0003-politica-conteudo-direitos-autor.md) — Política de conteúdo e direitos de autor
 - [ADR-0004](adr/0004-s3-de-desenvolvimento.md) — Object storage de desenvolvimento: versitygw em vez de MinIO
+- [ADR-0005](adr/0005-pacote-partilhado-score.md) — Pacote partilhado do score e Score v2

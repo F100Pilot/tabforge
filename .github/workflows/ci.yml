@@ -42,10 +42,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [api, worker]
+        project: [services/api, services/worker, packages/score]
     defaults:
       run:
-        working-directory: services/${{ matrix.service }}
+        working-directory: ${{ matrix.project }}
     services:
       postgres:
         image: postgres:17-alpine
@@ -76,7 +76,7 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run mypy src tests $(test -d eval && echo eval) $(test -d migrations && echo migrations)
       - name: Migrations match the models
-        if: matrix.service == 'api'
+        if: matrix.project == 'services/api'
         env:
           TABFORGE_DATABASE_URL: ${{ env.TABFORGE_TEST_DATABASE_URL }}
         run: uv run alembic upgrade head && uv run alembic check
@@ -91,7 +91,7 @@ jobs:
     needs: [python]
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t tabforge-api services/api
-      - run: docker build -t tabforge-worker services/worker
+      - run: docker build -f services/api/Dockerfile -t tabforge-api .
+      - run: docker build -f services/worker/Dockerfile -t tabforge-worker .
       - name: Compose file is valid
         run: cp .env.example .env && docker compose config -q
