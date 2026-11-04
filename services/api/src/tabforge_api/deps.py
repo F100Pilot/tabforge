@@ -114,6 +114,18 @@ def get_current_user(principal: PrincipalDep) -> User:
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
+def require_online(settings: SettingsDep) -> None:
+    """Routes that do not exist in env=desktop (email login, ADR-0008)."""
+    if settings.env == "desktop":
+        raise ProblemError(404, "not_found", "Not Found")
+
+
+def require_desktop(settings: SettingsDep) -> None:
+    """Routes that exist only in env=desktop (launch-token login, ADR-0008)."""
+    if settings.env != "desktop":
+        raise ProblemError(404, "not_found", "Not Found")
+
+
 def limit_writes(request: Request, user: CurrentUser) -> None:
     """Per-user rate limit for state-changing routes (threat model T3)."""
     retry_after = request.app.state.write_limiter.hit(str(user.id))

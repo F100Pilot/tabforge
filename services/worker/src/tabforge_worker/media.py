@@ -5,14 +5,26 @@ Hardening on top of the container sandbox (non-root, no network in production):
   magic bytes, so ffmpeg never auto-detects another format;
 - only the `file` protocol is allowed, so a crafted file cannot make ffmpeg fetch anything;
 - every call has a timeout, and stdin is closed.
+
+The executables come from TABFORGE_FFMPEG / TABFORGE_FFPROBE (default: found on PATH), so the
+desktop bundle (ADR-0008) can point at its own ffmpeg build.
 """
 
+import os
 import subprocess
 from pathlib import Path
 
 FORMATS = {"audio/wav": "wav", "audio/flac": "flac", "audio/ogg": "ogg", "audio/mpeg": "mp3"}
 PROBE_TIMEOUT_S = 30
 DECODE_TIMEOUT_S = 300
+
+
+def ffmpeg_executable() -> str:
+    return os.environ.get("TABFORGE_FFMPEG") or "ffmpeg"
+
+
+def ffprobe_executable() -> str:
+    return os.environ.get("TABFORGE_FFPROBE") or "ffprobe"
 
 
 class MediaError(Exception):
@@ -46,7 +58,7 @@ def _run(cmd: list[str], timeout_s: int) -> str:
 def probe_duration_s(path: Path, content_type: str) -> float:
     out = _run(
         [
-            "ffprobe",
+            ffprobe_executable(),
             "-v",
             "error",
             "-protocol_whitelist",
@@ -77,7 +89,7 @@ def normalize_to_wav(
     """Decode to 16-bit PCM WAV at the rate Demucs expects (44.1 kHz stereo)."""
     _run(
         [
-            "ffmpeg",
+            ffmpeg_executable(),
             "-nostdin",
             "-v",
             "error",

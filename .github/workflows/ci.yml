@@ -42,7 +42,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        project: [services/api, services/worker, packages/score]
+        project: [services/api, services/worker, packages/score, apps/desktop]
     defaults:
       run:
         working-directory: ${{ matrix.project }}
@@ -68,6 +68,8 @@ jobs:
     env:
       TABFORGE_TEST_DATABASE_URL: postgresql://tabforge:ci-only@localhost:5432/tabforge_test
       TABFORGE_TEST_S3_ENDPOINT: http://localhost:7070
+      # apps/desktop: embedded-Postgres test (ubuntu runners ship PostgreSQL; skipped if absent)
+      TABFORGE_TEST_PG_BIN: /usr/lib/postgresql/16/bin
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -83,8 +85,8 @@ jobs:
       - run: uv run pytest -q
       - name: Dependency audit (incl. ML extras)
         run: |
-          # Our own path package (packages/score) is not on PyPI; its dependencies are still audited.
-          uv export --frozen --all-extras --no-hashes --no-emit-project --no-emit-package tabforge-score > "$RUNNER_TEMP/req.txt"
+          # Our own path packages (score, api, worker) are not on PyPI; their dependencies are still audited.
+          uv export --frozen --all-extras --no-hashes --no-emit-project --no-emit-package tabforge-score --no-emit-package tabforge-api --no-emit-package tabforge-worker > "$RUNNER_TEMP/req.txt"
           uvx pip-audit --strict --no-deps --disable-pip -r "$RUNNER_TEMP/req.txt"
 
   e2e:

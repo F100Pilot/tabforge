@@ -1,4 +1,7 @@
-"""Outgoing email behind a small port: generic SMTP (stdlib) or, in dev without SMTP, the log."""
+"""Outgoing email behind a small port: generic SMTP (stdlib) or, in dev without SMTP, the log.
+
+env=desktop (ADR-0008) sends no email: the single local user signs in with the launch token.
+"""
 
 import logging
 import smtplib
@@ -64,7 +67,16 @@ class LogMailer:
         log.warning("dev mail (no SMTP configured): %s\n%s", subject, body)
 
 
+class DisabledMailer:
+    """Desktop (ADR-0008): no email at all; the magic-link routes answer 404 there."""
+
+    def send(self, to: str, subject: str, body: str) -> None:
+        raise RuntimeError("email is disabled in env=desktop")
+
+
 def build_mailer(settings: Settings) -> Mailer:
+    if settings.env == "desktop":
+        return DisabledMailer()
     if settings.smtp_host:
         return SmtpMailer(
             host=settings.smtp_host,

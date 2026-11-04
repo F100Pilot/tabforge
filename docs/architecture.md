@@ -96,6 +96,8 @@ erDiagram
 | `GET` | `/v1/tabs/{id}` | Tab + revisão atual (score) + alphaTex gerado no servidor |
 | `POST` | `/v1/tabs/{id}/revisions` | Nova revisão (edição) |
 | `GET` | `/health`, `/ready` | Liveness / readiness |
+| `POST` | `/v1/auth/desktop` | Só `env=desktop` (senão 404): `{token}` → 200 `{user, csrf_token}` + cookie de sessão; 403 `invalid_launch_token`; 429 `rate_limited` (10/min por IP) |
+| `PUT` | `/v1/local-storage/{key}` | Só com storage `local`: upload assinado (`expires`, `sig`) → 200 sem corpo; 403 `invalid_signature`/`upload_url_expired`; 400 `invalid_key`/`upload_size_mismatch`; 411 `length_required` |
 
 OpenAPI gerado automaticamente pelo FastAPI (`/openapi.json`) é a fonte de verdade. Implementado: auth e conta (US-07), uploads, jobs, tabs e revisões, `/health`, `/ready`. O export Guitar Pro/MIDI (US-05) é feito no browser com o alphaTab, sem endpoint (ADR-0007).
 
@@ -116,6 +118,17 @@ OpenAPI gerado automaticamente pelo FastAPI (`/openapi.json`) é a fonte de verd
 - **Email:** SMTP genérico (stdlib). Dev: Mailpit (`docker compose`, UI em `http://localhost:8025`). Sem `TABFORGE_SMTP_HOST`, em dev o link vai para o log da API; noutros ambientes a API não arranca.
 - **Eliminação de conta (RGPD art. 17):** `DELETE /v1/me` apaga primeiro os objetos de áudio (porta `ObjectStore`); se o storage falhar, 503 e nada é apagado, para o utilizador repetir. Depois apaga os `login_tokens` do email e o utilizador (cascata). Um job em curso cujo dono foi apagado termina sem efeito no worker (`job_gone`).
 - Google OAuth: no backlog.
+
+## Modo desktop (ADR-0008)
+
+Aplicação Windows para um só utilizador, sem servidor. Os mesmos serviços correm com `TABFORGE_ENV=desktop`; o comportamento online (`dev`/`test`/`prod`, S3, link mágico, CSRF) não muda.
+
+- **Configuração (falha fechada):** `env=desktop` exige `storage_backend=local`, `local_storage_dir`, `desktop_launch_token` e `local_upload_secret` (segredos com ≥ 32 caracteres) e um `api_public_url` em loopback (por defeito `http://127.0.0.1:47801`). `storage_backend=local` só é aceite com `env=desktop` ou `env=test`. `dev_auth` continua só em `env=dev`.
+- **Login:** o programa de arranque gera um token por arranque; `POST /v1/auth/desktop` compara-o em tempo constante e abre a sessão do utilizador local `local@tabforge.desktop` com o mesmo código de `verify` (cookie e token CSRF do ADR-0006). Sem SMTP: em desktop o mailer está desativado e `POST /v1/auth/magic-link` e `POST /v1/auth/verify` respondem 404 `not_found`.
+- **Só loopback:** em desktop a API recusa (400) pedidos cujo `Host` não seja `127.0.0.1` ou `localhost` (`TrustedHostMiddleware` do Starlette, compara só o nome, não a porta), contra DNS rebinding.
+- **Armazenamento:** `LocalObjectStore` implementa a porta `ObjectStore` numa pasta. As chaves passam por uma allow-list por segmento (`[A-Za-z0-9._-]`, sem `.`/`..`, ponto final ou nomes reservados do Windows) e o caminho resolvido tem de ficar dentro da pasta (também contra symlinks). `presign_put` devolve `{api_public_url}/v1/local-storage/{key}?expires=…&sig=…`, com HMAC-SHA256 (`local_upload_secret`) sobre método, chave, validade, `Content-Type` e `Content-Length`, validade ≤ 300 s.
+- **Upload assinado:** `PUT /v1/local-storage/{key}` só existe com storage `local`. A assinatura é a autorização (sem cookie nem CSRF, como um URL pré-assinado do S3): o pedido tem de trazer exatamente o `Content-Type` e o `Content-Length` assinados. O corpo vai para um ficheiro temporário na mesma pasta, cortado no tamanho assinado (corpo a mais ou a menos → 400 e o temporário é apagado), e só no fim é renomeado. CORS para as mesmas origens configuradas, com `PUT` só neste modo (a web corre em `http://127.0.0.1:47800`).
+- **Worker:** `TABFORGE_STORAGE_BACKEND=local` + `TABFORGE_LOCAL_STORAGE_DIR` selecionam `LocalAudioSource`, que copia o ficheiro para a pasta do job e apaga-o na retenção (mesma verificação de chave, duplicada no worker porque os serviços só partilham o pacote do score). A eliminação de conta usa a porta `ObjectStore` da API, por isso apaga também os ficheiros locais. `TABFORGE_FFMPEG`/`TABFORGE_FFPROBE` apontam para os binários embutidos (por defeito `ffmpeg`/`ffprobe` do `PATH`). O programa de arranque corre o loop numa thread com `run_forever(config, threading.Event())`.
 
 ## Erros, logging, configuração
 
@@ -144,3 +157,4 @@ OpenAPI gerado automaticamente pelo FastAPI (`/openapi.json`) é a fonte de verd
 - [ADR-0005](adr/0005-pacote-partilhado-score.md) — Pacote partilhado do score e Score v2
 - [ADR-0006](adr/0006-autenticacao.md) — Autenticação: link mágico por email e sessões opacas no servidor
 - [ADR-0007](adr/0007-export-no-browser.md) — Export Guitar Pro e MIDI no browser com o alphaTab
+- [ADR-0008](adr/0008-aplicacao-desktop-windows.md) — Aplicação desktop para Windows (uso pessoal, só CPU)

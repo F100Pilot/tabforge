@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { completeUpload, createUpload, isUnauthenticated, putFile, type SourceKind } from "@/lib/api";
 import { checkFile } from "@/lib/file-checks";
+import { IS_DESKTOP } from "@/lib/desktop";
 
 type Phase = "idle" | "preparing" | "uploading" | "finishing";
 
@@ -128,7 +129,9 @@ export function UploadForm() {
         </label>
       </fieldset>
 
-      <p className="note">Privado · o áudio é apagado ao fim de 30 dias</p>
+      <p className="note">
+        {IS_DESKTOP ? "Fica só neste PC" : "Privado · o áudio é apagado ao fim de 30 dias"}
+      </p>
 
       <button type="submit" className="btn btn-primary btn-block" disabled={busy}>
         Gerar tablatura

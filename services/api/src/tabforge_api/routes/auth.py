@@ -1,13 +1,19 @@
-"""US-07 login (ADR-0006): magic link by email, opaque session cookie, CSRF synchronizer token."""
+"""US-07 login (ADR-0006): magic link by email, opaque session cookie, CSRF synchronizer token.
 
+env=desktop (ADR-0008) swaps the magic link for the launcher's per-launch token
+(`POST /v1/auth/desktop`); both open the same session with the same cookie and CSRF token.
+"""
+
+import hmac
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, field_validator
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import Session
 
 from tabforge_api.auth import (
     MAX_TOKEN_LENGTH,
@@ -25,6 +31,8 @@ from tabforge_api.deps import (
     SettingsDep,
     find_auth_session,
     require_csrf,
+    require_desktop,
+    require_online,
 )
 from tabforge_api.limits import SlidingWindowLimiter
 from tabforge_api.models import AuthSession, LoginToken, User
@@ -38,6 +46,10 @@ router = APIRouter(prefix="/v1/auth", tags=["auth"])
 MAGIC_LINK_WINDOW_S = 15 * 60
 MAGIC_LINK_PER_EMAIL = 5
 MAGIC_LINK_PER_IP = 20
+# Desktop launch-token login (ADR-0008): one local user, brute force capped per client IP.
+DESKTOP_USER_EMAIL = "local@tabforge.desktop"
+DESKTOP_LOGIN_PER_IP = 10
+DESKTOP_LOGIN_WINDOW_S = 60
 
 
 class MagicLinkIn(BaseModel):
@@ -53,6 +65,10 @@ class MagicLinkIn(BaseModel):
 
 
 class VerifyIn(BaseModel):
+    token: str
+
+
+class DesktopLoginIn(BaseModel):
     token: str
 
 
@@ -103,7 +119,42 @@ def clear_session_cookie(response: Response, settings: Settings) -> None:
     )
 
 
-@router.post("/magic-link", status_code=202)
+def _get_or_create_user(session: Session, email: str) -> User:
+    """`email` must already be normalized (lowercase)."""
+    session.execute(
+        insert(User)
+        .values(email=email)
+        .on_conflict_do_nothing(index_elements=[func.lower(User.email)])
+    )
+    return session.execute(select(User).where(func.lower(User.email) == email)).scalar_one()
+
+
+def _open_session(
+    request: Request, response: Response, session: Session, settings: Settings, user: User
+) -> SessionOut:
+    """New session + CSRF token for `user`, cookie set on `response` (commits)."""
+    previous = find_auth_session(request, session)
+    if previous is not None:  # no session fixation: a login always replaces the old session
+        session.delete(previous)
+    cookie, csrf = new_token(), new_token()
+    session.add(
+        AuthSession(
+            user_id=user.id,
+            token_hash=hash_token(cookie),
+            csrf_token=csrf,
+            expires_at=datetime.now(UTC) + timedelta(days=settings.session_ttl_days),
+        )
+    )
+    session.commit()  # before the cookie leaves (yield dependencies exit after the response)
+    set_session_cookie(response, cookie, settings)
+    return SessionOut(user=_user_out(user), csrf_token=csrf)
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+@router.post("/magic-link", status_code=202, dependencies=[Depends(require_online)])
 def request_magic_link(
     body: MagicLinkIn,
     request: Request,
@@ -112,8 +163,7 @@ def request_magic_link(
     mailer: MailerDep,
 ) -> dict[str, str]:
     """Always 202 for a valid address: the answer never depends on whether an account exists."""
-    client_ip = request.client.host if request.client else "unknown"
-    _hit(request.app.state.magic_link_ip_limiter, client_ip)
+    _hit(request.app.state.magic_link_ip_limiter, _client_ip(request))
     _hit(request.app.state.magic_link_email_limiter, hash_token(body.email))
 
     token = new_token()
@@ -139,7 +189,7 @@ def request_magic_link(
     return {}
 
 
-@router.post("/verify")
+@router.post("/verify", dependencies=[Depends(require_online)])
 def verify(
     body: VerifyIn,
     request: Request,
@@ -163,29 +213,27 @@ def verify(
     ).scalar_one_or_none()
     if email is None:
         raise invalid
+    user = _get_or_create_user(session, email)
+    return _open_session(request, response, session, settings, user)
 
-    session.execute(
-        insert(User)
-        .values(email=email)
-        .on_conflict_do_nothing(index_elements=[func.lower(User.email)])
-    )
-    user = session.execute(select(User).where(func.lower(User.email) == email)).scalar_one()
 
-    previous = find_auth_session(request, session)
-    if previous is not None:  # no session fixation: a login always replaces the old session
-        session.delete(previous)
-    cookie, csrf = new_token(), new_token()
-    session.add(
-        AuthSession(
-            user_id=user.id,
-            token_hash=hash_token(cookie),
-            csrf_token=csrf,
-            expires_at=datetime.now(UTC) + timedelta(days=settings.session_ttl_days),
-        )
-    )
-    session.commit()  # before the cookie leaves (yield dependencies exit after the response)
-    set_session_cookie(response, cookie, settings)
-    return SessionOut(user=_user_out(user), csrf_token=csrf)
+@router.post("/desktop", dependencies=[Depends(require_desktop)])
+def desktop_login(
+    body: DesktopLoginIn,
+    request: Request,
+    response: Response,
+    session: SessionDep,
+    settings: SettingsDep,
+) -> SessionOut:
+    """Exchange the launcher's per-launch token for the local user's session (ADR-0008)."""
+    _hit(request.app.state.desktop_login_limiter, _client_ip(request))
+    expected = settings.desktop_launch_token
+    if expected is None or not hmac.compare_digest(
+        body.token.encode(), expected.get_secret_value().encode()
+    ):
+        raise ProblemError(403, "invalid_launch_token", "invalid launch token")
+    user = _get_or_create_user(session, DESKTOP_USER_EMAIL)
+    return _open_session(request, response, session, settings, user)
 
 
 @router.get("/session")

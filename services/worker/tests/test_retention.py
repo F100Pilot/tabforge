@@ -1,9 +1,11 @@
 import uuid
+from pathlib import Path
 from typing import Any
 
 import psycopg
 import pytest
 
+from tabforge_worker.adapters.local_source import LocalAudioSource, key_path
 from tabforge_worker.retention import purge_auth, purge_expired
 
 pytestmark = pytest.mark.db
@@ -94,3 +96,23 @@ def test_purge_auth_removes_expired_login_tokens_and_sessions(conn: Conn) -> Non
     assert purge_auth(conn) == 2
     assert conn.execute("SELECT token_hash FROM login_tokens").fetchall() == [("tok-live",)]
     assert conn.execute("SELECT token_hash FROM sessions").fetchall() == [("ses-live",)]
+
+
+def test_local_storage_files_are_deleted(conn: Conn, tmp_path: Path) -> None:
+    # Desktop (ADR-0008): the same purge, through the local source.
+    old = _asset(conn, "uploaded", "-1 day")
+    fresh = _asset(conn, "uploaded", "29 days")
+    for key in (old, fresh):
+        path = key_path(tmp_path, key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"RIFF")
+    assert purge_expired(conn, LocalAudioSource(tmp_path)) == 1
+    assert not key_path(tmp_path, old).exists()
+    assert key_path(tmp_path, fresh).exists()
+    assert _status(conn, old) == "expired"
+
+
+def test_local_file_already_gone_is_still_marked_expired(conn: Conn, tmp_path: Path) -> None:
+    key = _asset(conn, "uploaded", "-1 day")
+    assert purge_expired(conn, LocalAudioSource(tmp_path)) == 1
+    assert _status(conn, key) == "expired"

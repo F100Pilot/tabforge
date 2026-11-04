@@ -1,4 +1,5 @@
 import { parsePublicConfig } from "./config";
+import { IS_DESKTOP } from "./desktop";
 import { declaredType, type FileLike } from "./file-checks";
 
 export type SourceKind = "mix" | "guitar_stem";
@@ -220,6 +221,8 @@ export function parseProblem(status: number, body: unknown): ProblemError {
 }
 
 export function apiBaseUrl(): URL {
+  // Desktop: same origin; src/proxy.ts forwards /v1 to the API on whatever port it got.
+  if (IS_DESKTOP && typeof window !== "undefined") return new URL(window.location.origin);
   // Must reference process.env.NEXT_PUBLIC_API_URL literally so Next inlines it.
   return parsePublicConfig({ NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL }).apiBaseUrl;
 }
@@ -422,6 +425,19 @@ export async function requestMagicLink(email: string): Promise<void> {
 export async function verifyLogin(token: string): Promise<Session> {
   const session = parseSession(
     await request("/v1/auth/verify", {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ token }),
+    }),
+  );
+  setCsrfToken(session.csrf_token);
+  return session;
+}
+
+/** Desktop build: exchanges the launcher's per-start token for the session (ADR-0008). */
+export async function desktopLogin(token: string): Promise<Session> {
+  const session = parseSession(
+    await request("/v1/auth/desktop", {
       method: "POST",
       headers: JSON_HEADERS,
       body: JSON.stringify({ token }),

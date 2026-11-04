@@ -31,6 +31,21 @@ Em M1 a autenticação é um stub: com `TABFORGE_DEV_AUTH=true` (só aceite com 
 
 Worker com stack ML (pesado, ~GBs): `cd services/worker && uv sync --extra ml`.
 
+## Windows (uso pessoal, ADR-0008)
+
+Requisito: [Git para Windows](https://git-scm.com/download/win). O resto (uv, Python, PostgreSQL, Node, ffmpeg, pesos do Demucs) é instalado pelo script na primeira vez.
+
+```bat
+git clone https://github.com/F100Pilot/tabforge.git
+cd tabforge
+start.bat
+```
+
+- Cada `start.bat` faz `git pull`, atualiza as dependências, recompila a interface só se mudou e abre o TabForge numa janela.
+- `start.bat --smoke` corre um autoteste sem janela (uma transcrição real).
+- Dados (base de dados, áudio, registos): `%LOCALAPPDATA%\TabForge`. Não saem do PC.
+- O instalador `TabForge-Setup.exe` é gerado pelo workflow `Desktop (Windows)` como artefacto.
+
 ## Qualidade
 
 | Componente | Comandos |
