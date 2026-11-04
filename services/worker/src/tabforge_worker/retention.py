@@ -1,4 +1,5 @@
 """Audio retention (PRD §5): delete originals past `expires_at` and abandoned uploads.
+Also drops expired login tokens and sessions (US-07), which are useless once expired.
 
 Rows are claimed with FOR UPDATE SKIP LOCKED so several workers never purge the same object.
 A storage error leaves the row untouched for the next run; S3 deletes are idempotent, so an
@@ -40,3 +41,11 @@ def purge_expired(conn: psycopg.Connection[Any], store: ObjectDeleter, batch: in
             conn.execute("UPDATE audio_assets SET status = 'expired' WHERE id = %s", (audio_id,))
             purged += 1
     return purged
+
+
+def purge_auth(conn: psycopg.Connection[Any]) -> int:
+    """Delete expired login tokens and sessions; return how many rows went."""
+    with conn.transaction():
+        tokens = conn.execute("DELETE FROM login_tokens WHERE expires_at < now()").rowcount
+        sessions = conn.execute("DELETE FROM sessions WHERE expires_at < now()").rowcount
+    return tokens + sessions

@@ -74,10 +74,22 @@ def complete(
     score: dict[str, Any],
     duration_ms: int | None = None,
     sha256: str | None = None,
-) -> uuid.UUID:
-    """Store the generated tab and its first revision, and mark the job done (one transaction)."""
+) -> uuid.UUID | None:
+    """Store the generated tab and its first revision, and mark the job done (one transaction).
+
+    Returns None, storing nothing, when the owner deleted their account meanwhile (US-07): the
+    job is gone with them. KEY SHARE on the user row orders this against a concurrent delete
+    (which waits, then cascades to the new tab) instead of deadlocking on the tab's foreign key.
+    """
     title = f"Transcrição {datetime.now(UTC):%Y-%m-%d}"
     with conn.transaction():
+        owner = conn.execute(
+            "SELECT 1 FROM users u JOIN audio_assets a ON a.user_id = u.id "
+            "JOIN jobs j ON j.audio_id = a.id WHERE j.id = %s FOR KEY SHARE OF u",
+            (job.id,),
+        ).fetchone()
+        if owner is None:
+            return None
         conn.execute(
             "UPDATE audio_assets SET duration_ms = COALESCE(%s, duration_ms), "
             "sha256 = COALESCE(%s, sha256) WHERE id = %s",

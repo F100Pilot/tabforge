@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Any
 
@@ -178,3 +179,38 @@ def test_pipeline_error_code_is_stored(conn: Conn, database_url: str) -> None:
 
 def test_run_once_on_empty_queue_returns_false(conn: Conn, database_url: str) -> None:
     assert run_once(conn, WorkerConfig(database_url), StubPipeline()) is False
+
+
+class DeletingPipeline(RecordingPipeline):
+    """The owner deletes their account (DELETE /v1/me) while the job is being processed."""
+
+    def __init__(self, database_url: str) -> None:
+        super().__init__()
+        self.database_url = database_url
+
+    def process(self, job: queue.ClaimedJob, on_stage: StageCallback) -> PipelineResult:
+        result = super().process(job, on_stage)
+        with psycopg.connect(self.database_url, autocommit=True) as other:
+            other.execute("DELETE FROM users WHERE id = %s", (job.owner_id,))
+        return result
+
+
+def test_complete_is_a_noop_when_the_owner_was_deleted(conn: Conn) -> None:
+    _job(conn)
+    job = queue.claim_next(conn, lease_s=600, max_attempts=3)
+    assert job is not None
+    conn.execute("DELETE FROM users WHERE id = %s", (job.owner_id,))
+    assert queue.complete(conn, job, STUB_SCORE) is None
+    assert conn.execute("SELECT count(*) FROM tabs").fetchone() == (0,)
+
+
+def test_run_once_survives_account_deletion_mid_job(
+    conn: Conn, database_url: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    _job(conn)
+    with caplog.at_level(logging.INFO, logger="tabforge_worker"):
+        assert run_once(conn, WorkerConfig(database_url), DeletingPipeline(database_url))
+    assert '"job_gone"' in caplog.text
+    assert "job_failed" not in caplog.text
+    assert conn.execute("SELECT count(*) FROM jobs").fetchone() == (0,)
+    assert conn.execute("SELECT count(*) FROM tabs").fetchone() == (0,)

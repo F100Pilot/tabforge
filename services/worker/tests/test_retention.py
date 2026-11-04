@@ -4,7 +4,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from tabforge_worker.retention import purge_expired
+from tabforge_worker.retention import purge_auth, purge_expired
 
 pytestmark = pytest.mark.db
 
@@ -75,3 +75,22 @@ def test_rejected_and_expired_rows_are_left_alone(conn: Conn) -> None:
     store = FakeStore()
     assert purge_expired(conn, store) == 0
     assert store.deleted == []
+
+
+def test_purge_auth_removes_expired_login_tokens_and_sessions(conn: Conn) -> None:
+    user = conn.execute("INSERT INTO users (email) VALUES ('a@x.y') RETURNING id").fetchone()
+    assert user is not None
+    for name, expires in (("old", "-1 second"), ("live", "10 minutes")):
+        conn.execute(
+            "INSERT INTO login_tokens (email, token_hash, expires_at) "
+            "VALUES ('a@x.y', %s, now() + %s::interval)",
+            (f"tok-{name}", expires),
+        )
+        conn.execute(
+            "INSERT INTO sessions (user_id, token_hash, csrf_token, expires_at) "
+            "VALUES (%s, %s, 'c', now() + %s::interval)",
+            (user[0], f"ses-{name}", expires),
+        )
+    assert purge_auth(conn) == 2
+    assert conn.execute("SELECT token_hash FROM login_tokens").fetchall() == [("tok-live",)]
+    assert conn.execute("SELECT token_hash FROM sessions").fetchall() == [("ses-live",)]

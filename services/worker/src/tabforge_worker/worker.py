@@ -92,6 +92,9 @@ def run_once(conn: psycopg.Connection[Any], config: WorkerConfig, pipeline: Pipe
         log.exception(_event("job_failed", job=job.id, error_code=code))
         queue.fail(conn, job.id, code)
         return True
+    if tab_id is None:
+        log.info(_event("job_gone", job=job.id))  # owner deleted their account mid-job
+        return True
     log.info(_event("job_done", job=job.id, tab=tab_id))
     return True
 
@@ -132,7 +135,8 @@ def main() -> int:
                 while not stopping:
                     if time.monotonic() >= next_purge:
                         purged = retention.purge_expired(conn, store)
-                        log.info(_event("retention_run", purged=purged))
+                        auth_purged = retention.purge_auth(conn)
+                        log.info(_event("retention_run", purged=purged, auth_purged=auth_purged))
                         next_purge = time.monotonic() + config.retention_interval_s
                     if not run_once(conn, config, pipeline):
                         time.sleep(config.poll_interval_s)
