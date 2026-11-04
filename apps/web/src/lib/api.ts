@@ -294,3 +294,53 @@ export async function listJobs(limit: number, signal?: AbortSignal) {
 export async function listTabs(limit: number, signal?: AbortSignal) {
   return parseTabList(await request(`/v1/tabs?limit=${encodeURIComponent(String(limit))}`, { signal }));
 }
+
+export interface RevisionSummary {
+  id: string;
+  source: "ai" | "user";
+  created_at: string;
+}
+
+export function parseRevisionList(v: unknown): RevisionSummary[] {
+  if (!isRec(v) || !Array.isArray(v.items)) throw new ResponseShapeError("revision list");
+  return v.items.map((it) => {
+    if (!isRec(it) || !isStr(it.id) || (it.source !== "ai" && it.source !== "user") || !isStr(it.created_at)) {
+      throw new ResponseShapeError("revision");
+    }
+    return { id: it.id, source: it.source, created_at: it.created_at };
+  });
+}
+
+export function parsePreview(v: unknown): string {
+  if (!isRec(v) || !isStr(v.alphatex)) throw new ResponseShapeError("preview");
+  return v.alphatex;
+}
+
+const JSON_HEADERS = { "Content-Type": "application/json" };
+
+/** Server-side alphaTex for an edited score (also validates it: 422 `validation_error`). */
+export async function previewScore(tabId: string, score: unknown, signal?: AbortSignal) {
+  return parsePreview(
+    await request(`/v1/tabs/${encodeURIComponent(tabId)}/preview`, {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ score }),
+      signal,
+    }),
+  );
+}
+
+/** Saves a new current revision. 409 `revision_conflict` when `baseRevisionId` is no longer current. */
+export async function saveRevision(tabId: string, baseRevisionId: string, score: unknown) {
+  return parseTab(
+    await request(`/v1/tabs/${encodeURIComponent(tabId)}/revisions`, {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ base_revision_id: baseRevisionId, score }),
+    }),
+  );
+}
+
+export async function listRevisions(tabId: string, signal?: AbortSignal) {
+  return parseRevisionList(await request(`/v1/tabs/${encodeURIComponent(tabId)}/revisions`, { signal }));
+}
