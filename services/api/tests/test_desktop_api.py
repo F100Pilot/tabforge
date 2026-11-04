@@ -124,3 +124,42 @@ def test_content_mismatch_deletes_the_local_file(
     resp = desktop.post(f"/v1/uploads/{ticket['audio_id']}/complete", headers=headers)
     assert resp.status_code == 415
     assert not any(p.is_file() for p in tmp_path.rglob("*"))
+
+
+def _upload_and_complete(client: TestClient, headers: dict[str, str]) -> str:
+    ticket = client.post(
+        "/v1/uploads",
+        json={"content_type": "audio/wav", "size_bytes": len(WAV), "source_kind": "guitar_stem"},
+        headers=headers,
+    )
+    assert ticket.status_code == 201, ticket.text
+    body = ticket.json()
+    put = client.put(body["upload_url"], content=WAV, headers=body["headers"])
+    assert put.status_code == 200, put.text
+    done = client.post(f"/v1/uploads/{body['audio_id']}/complete", headers=headers)
+    assert done.status_code == 201, done.text
+    audio_id: str = body["audio_id"]
+    return audio_id
+
+
+def test_desktop_has_no_daily_upload_quota(
+    engine: Engine, database_url: str, tmp_path: Path
+) -> None:
+    """One local user on their own PC (ADR-0008): the online abuse quota does not apply."""
+    client = TestClient(
+        create_app(desktop_settings(tmp_path, database_url=database_url, daily_upload_limit=1)),
+        base_url=API,
+    )
+    headers = {CSRF_HEADER: _login(client)}
+    for _ in range(3):
+        _upload_and_complete(client, headers)
+
+
+def test_desktop_audio_never_expires(desktop: TestClient, engine: Engine) -> None:
+    """Retention purges `expires_at < now()`; NULL keeps the original audio on the PC."""
+    audio_id = _upload_and_complete(desktop, {CSRF_HEADER: _login(desktop)})
+    with engine.connect() as conn:
+        expires = conn.execute(
+            text("SELECT expires_at FROM audio_assets WHERE id = :id"), {"id": audio_id}
+        ).scalar_one()
+    assert expires is None

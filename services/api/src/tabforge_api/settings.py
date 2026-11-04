@@ -1,3 +1,4 @@
+from datetime import timedelta
 from pathlib import Path
 from typing import Literal, Self
 
@@ -93,6 +94,16 @@ class Settings(BaseSettings):
             if secret is not None and len(secret.get_secret_value()) < MIN_SECRET_LENGTH:
                 raise ValueError(f"{name} must have at least {MIN_SECRET_LENGTH} characters")
         return self
+
+    @property
+    def daily_upload_quota(self) -> int | None:
+        """Uploads per user per 24 h; None = no quota (desktop: one local user, ADR-0008)."""
+        return None if self.env == "desktop" else self.daily_upload_limit
+
+    @property
+    def audio_retention(self) -> timedelta | None:
+        """How long original audio is kept; None = kept until the user deletes it (desktop)."""
+        return None if self.env == "desktop" else timedelta(days=self.audio_retention_days)
 
     @property
     def sqlalchemy_url(self) -> str:

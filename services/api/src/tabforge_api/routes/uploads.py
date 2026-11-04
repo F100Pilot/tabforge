@@ -46,22 +46,24 @@ def create_upload(
         raise ProblemError(
             413, "file_too_large", f"maximum size is {settings.upload_max_bytes} bytes"
         )
-    recent = session.execute(
-        select(func.count())
-        .select_from(AudioAsset)
-        .where(
-            AudioAsset.user_id == user.id,
-            AudioAsset.status != "rejected",
-            AudioAsset.created_at > datetime.now(UTC) - timedelta(days=1),
-        )
-    ).scalar_one()
-    if recent >= settings.daily_upload_limit:
-        raise ProblemError(
-            429,
-            "quota_exceeded",
-            f"daily limit of {settings.daily_upload_limit} uploads reached",
-            headers={"Retry-After": "3600"},
-        )
+    quota = settings.daily_upload_quota
+    if quota is not None:
+        recent = session.execute(
+            select(func.count())
+            .select_from(AudioAsset)
+            .where(
+                AudioAsset.user_id == user.id,
+                AudioAsset.status != "rejected",
+                AudioAsset.created_at > datetime.now(UTC) - timedelta(days=1),
+            )
+        ).scalar_one()
+        if recent >= quota:
+            raise ProblemError(
+                429,
+                "quota_exceeded",
+                f"daily limit of {quota} uploads reached",
+                headers={"Retry-After": "3600"},
+            )
 
     audio_id = uuid.uuid4()
     asset = AudioAsset(
@@ -116,7 +118,9 @@ def complete_upload(
         )
 
     asset.status = "uploaded"
-    asset.expires_at = datetime.now(UTC) + timedelta(days=settings.audio_retention_days)
+    retention = settings.audio_retention
+    # NULL never matches the worker's `expires_at < now()` purge (desktop keeps the audio).
+    asset.expires_at = datetime.now(UTC) + retention if retention is not None else None
     job = Job(audio_id=asset.id, status="queued", attempts=0)
     session.add(job)
     session.flush()
