@@ -18,7 +18,7 @@ flowchart LR
   U[Browser] --> W[web<br/>Next.js + alphaTab]
   W -->|REST/JSON| A[api<br/>FastAPI · Python 3.13]
   A --> DB[(PostgreSQL<br/>dados + fila de jobs)]
-  A -->|URLs pré-assinados| S3[(Object storage<br/>S3 / MinIO)]
+  A -->|URLs pré-assinados| S3[(Object storage<br/>S3 / versitygw em dev)]
   K[worker<br/>Python 3.13 · Demucs + Basic Pitch ONNX] -->|SKIP LOCKED| DB
   K --> S3
   U -->|upload direto via URL pré-assinado| S3
@@ -30,7 +30,7 @@ flowchart LR
 | `services/api` | Auth, CRUD, criação de jobs, URLs pré-assinados, rate limiting | FastAPI, SQLAlchemy 2, Alembic |
 | `services/worker` | Pipeline de transcrição | Python 3.13, Demucs 4.1 (MIT), Basic Pitch 0.4 (backend ONNX, sem TensorFlow) |
 | PostgreSQL | Dados + fila (`jobs` com `FOR UPDATE SKIP LOCKED`) | Postgres 17 |
-| Object storage | Áudio, stems, MIDI intermédio | S3 em produção, MinIO em dev |
+| Object storage | Áudio, stems, MIDI intermédio | S3 em produção, versitygw em dev (ADR-0004) |
 
 Sem Redis/broker no MVP: a fila em Postgres chega para o volume previsto e remove um serviço (ADR-0001).
 
@@ -62,13 +62,16 @@ erDiagram
   JOB ||--o| TAB : produces
   TAB ||--o{ TAB_REVISION : has
   USER { uuid id; text email; timestamptz created_at; timestamptz deleted_at }
-  AUDIO_ASSET { uuid id; uuid user_id; text storage_key; text sha256; int duration_ms; timestamptz expires_at }
-  JOB { uuid id; uuid audio_id; text status; text stage; int attempts; text error_code; timestamptz locked_at }
+  AUDIO_ASSET { uuid id; uuid user_id; text status; text source_kind; text content_type; bigint size_bytes; text storage_key; text sha256; int duration_ms; timestamptz expires_at }
+  JOB { uuid id; uuid audio_id; text status; text stage; int attempts; text error_code; timestamptz locked_at; uuid tab_id }
   TAB { uuid id; uuid owner_id; text title; text tuning; text visibility; uuid current_revision_id }
   TAB_REVISION { uuid id; uuid tab_id; jsonb score; text source; timestamptz created_at }
 ```
 
-- `JOB.status`: `queued | running | done | failed`; `stage`: `separating | transcribing | arranging`.
+- `AUDIO_ASSET.status`: `pending_upload | uploaded | rejected`; `source_kind`: `mix | guitar_stem` (escolha do utilizador no upload).
+- `JOB.status`: `queued | running | done | failed`; `stage`: `separating | transcribing | arranging`. `guitar_stem` salta `separating` (ADR-0002, decisão M0).
+- Fila: o worker reclama o job `queued` mais antigo (ou `running` com lease expirado) com `FOR UPDATE SKIP LOCKED`; cada etapa renova `locked_at`. Acima de 3 tentativas o job falha com `max_attempts_exceeded`; erro numa etapa → `failed` com `<etapa>_failed`.
+- Schema: migrações Alembic em `services/api/migrations` (a API é dona do schema; o worker usa SQL via psycopg).
 - `TAB.visibility`: `private` (default) `| unlisted | public` (public desativado até ADR-0003 ser fechado).
 - `TAB_REVISION` imutável; `source`: `ai | user`.
 
@@ -76,15 +79,25 @@ erDiagram
 
 | Método | Rota | Descrição |
 |---|---|---|
-| `POST` | `/v1/uploads` | Devolve URL pré-assinado (PUT) + `audio_id`; valida tamanho declarado |
-| `POST` | `/v1/uploads/{id}/complete` | Valida magic bytes/duração; cria job |
+| `POST` | `/v1/uploads` | `{content_type, size_bytes, source_kind}` → URL pré-assinado (PUT, assina `Content-Type` e `Content-Length`, ≤ 5 min) + `audio_id`; 413/415 |
+| `POST` | `/v1/uploads/{id}/complete` | Confirma tamanho e magic bytes (se não coincidirem: apaga, 415); cria job `queued` |
 | `GET` | `/v1/jobs/{id}` | Estado + etapa |
-| `GET` | `/v1/tabs/{id}` | Tab + revisão atual |
+| `GET` | `/v1/tabs/{id}` | Tab + revisão atual (score) + alphaTex gerado no servidor |
 | `POST` | `/v1/tabs/{id}/revisions` | Nova revisão (edição) |
 | `GET` | `/v1/tabs/{id}/export?format=gp\|midi` | Export |
 | `GET` | `/health`, `/ready` | Liveness / readiness |
 
-OpenAPI gerado automaticamente pelo FastAPI (`/openapi.json`) é a fonte de verdade.
+OpenAPI gerado automaticamente pelo FastAPI (`/openapi.json`) é a fonte de verdade. Implementado no M1: uploads, jobs, `GET /v1/tabs/{id}`, `/health`, `/ready`.
+
+### Validação de uploads (US-01)
+
+- Tipo e tamanho declarados validados ao criar o upload (415/413); o URL pré-assinado assina ambos, por isso o storage rejeita outro conteúdo (403).
+- Ao completar: tamanho real (HEAD) e magic bytes (GET com `Range`, 12 bytes). A API nunca descodifica áudio (T1).
+- **Duração (≤ 10 min) é verificada no worker** (etapa de normalização, M2, ffprobe no container isolado), não na API: obrigaria a API a descodificar input não confiável. Consequência: um ficheiro longo devolve `failed` com `audio_too_long` no job, em vez de 413 no upload. Desvio ao critério de US-01, registado aqui.
+
+### Autenticação no M1
+
+- Stub: com `dev_auth` (só aceite com `env=dev`) todos os pedidos agem como um utilizador de dev; sem ele, `/v1` responde 401 (fail closed). As rotas dependem só de `get_current_user`, que a US-07 (M2) substitui.
 
 ## Erros, logging, configuração
 
@@ -109,3 +122,4 @@ OpenAPI gerado automaticamente pelo FastAPI (`/openapi.json`) é a fonte de verd
 - [ADR-0001](adr/0001-monorepo-e-stack.md) — Monorepo e stack
 - [ADR-0002](adr/0002-pipeline-transcricao.md) — Pipeline de transcrição e isolamento do worker
 - [ADR-0003](adr/0003-politica-conteudo-direitos-autor.md) — Política de conteúdo e direitos de autor
+- [ADR-0004](adr/0004-s3-de-desenvolvimento.md) — Object storage de desenvolvimento: versitygw em vez de MinIO
