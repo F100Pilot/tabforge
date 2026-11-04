@@ -431,6 +431,19 @@ export async function verifyLogin(token: string): Promise<Session> {
   return session;
 }
 
+/** Desktop build: exchanges the launcher's per-start token for the session (ADR-0008). */
+export async function desktopLogin(token: string): Promise<Session> {
+  const session = parseSession(
+    await request("/v1/auth/desktop", {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ token }),
+    }),
+  );
+  setCsrfToken(session.csrf_token);
+  return session;
+}
+
 /** Current session, or null when anonymous (401). */
 export async function getSession(signal?: AbortSignal): Promise<Session | null> {
   try {
