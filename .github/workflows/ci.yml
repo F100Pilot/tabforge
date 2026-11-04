@@ -46,13 +46,40 @@ jobs:
     defaults:
       run:
         working-directory: services/${{ matrix.service }}
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: tabforge
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: tabforge_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U tabforge" --health-interval 5s --health-retries 10
+      s3:
+        image: versity/versitygw:v1.9.0
+        env:
+          ROOT_ACCESS_KEY: tabforge
+          ROOT_SECRET_KEY: tabforge-dev-secret
+          VGW_BACKEND: posix
+          VGW_BACKEND_ARG: /data
+        ports: ["7070:7070"]
+        options: --tmpfs /data
+    env:
+      TABFORGE_TEST_DATABASE_URL: postgresql://tabforge:ci-only@localhost:5432/tabforge_test
+      TABFORGE_TEST_S3_ENDPOINT: http://localhost:7070
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      - run: uv run mypy src tests $(test -d eval && echo eval)
+      - run: uv run mypy src tests $(test -d eval && echo eval) $(test -d migrations && echo migrations)
+      - name: Migrations match the models
+        if: matrix.service == 'api'
+        env:
+          TABFORGE_DATABASE_URL: ${{ env.TABFORGE_TEST_DATABASE_URL }}
+        run: uv run alembic upgrade head && uv run alembic check
       - run: uv run pytest -q
       - name: Dependency audit (incl. ML extras)
         run: |
@@ -66,3 +93,5 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build -t tabforge-api services/api
       - run: docker build -t tabforge-worker services/worker
+      - name: Compose file is valid
+        run: cp .env.example .env && docker compose config -q
