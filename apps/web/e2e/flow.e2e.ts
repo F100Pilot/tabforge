@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { Download } from "@playwright/test";
 import { expect, test, type Page } from "@playwright/test";
 
 /*
@@ -60,6 +61,11 @@ async function signIn(page: Page, email: string): Promise<string> {
   return link;
 }
 
+async function downloadBytes(download: Download): Promise<Buffer> {
+  const path = await download.path();
+  return readFileSync(path);
+}
+
 async function selectFirstNote(page: Page): Promise<void> {
   const frets = page.locator(".at-host svg text").filter({ hasText: /^\d+$/ });
   await expect(frets.first()).toBeVisible({ timeout: 30_000 });
@@ -101,6 +107,36 @@ test("sign in, transcribe, edit, sign out and delete the account", async ({ page
   await expect(page.getByText("Por guardar")).toBeVisible();
   await page.keyboard.press("Control+s");
   await expect(page.getByText("Revisão guardada.")).toBeVisible();
+
+  // US-05: Guitar Pro and MIDI downloads, and printing on the light palette.
+  await page.goto(tabUrl);
+  await expect(page.getByText("Pronto.")).toBeVisible({ timeout: 30_000 });
+  for (const [label, ext, magic] of [
+    ["Guitar Pro", ".gp", "PK"],
+    ["MIDI", ".mid", "MThd"],
+  ] as const) {
+    await page.getByRole("button", { name: /Exportar/ }).click();
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("button", { name: new RegExp(label) }).click(),
+    ]);
+    expect(download.suggestedFilename()).toMatch(new RegExp(`\\${ext}$`));
+    expect((await downloadBytes(download)).subarray(0, magic.length).toString("latin1")).toBe(magic);
+  }
+  await page.getByRole("button", { name: "Escura" }).click();
+  await page.evaluate(() => {
+    const w = window as unknown as { printedTheme?: string | null };
+    window.print = () => {
+      w.printedTheme = document.querySelector("[data-score-theme]")?.getAttribute("data-score-theme") ?? null;
+    };
+  });
+  await page.getByRole("button", { name: /Exportar/ }).click();
+  await page.getByRole("button", { name: "Imprimir / PDF" }).click();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { printedTheme?: string }).printedTheme))
+    .toBe("light");
+  await page.evaluate(() => window.dispatchEvent(new Event("afterprint")));
+  await expect(page.locator("[data-score-theme]")).toHaveAttribute("data-score-theme", "dark");
 
   await page.goto("/");
   await page.getByRole("button", { name: "Terminar sessão" }).click();

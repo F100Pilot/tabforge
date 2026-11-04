@@ -124,6 +124,7 @@ jobs:
       TABFORGE_WORKER_POLL_INTERVAL_S: "0.5"
       NEXT_PUBLIC_API_URL: http://localhost:8000
       NEXT_TELEMETRY_DISABLED: "1"
+      LANG: C.UTF-8 # Chromium drops non-ASCII download names under the POSIX locale
     steps:
       - uses: actions/checkout@v4
       - run: echo "E2E_API_LOG=$RUNNER_TEMP/api.log" >> "$GITHUB_ENV"

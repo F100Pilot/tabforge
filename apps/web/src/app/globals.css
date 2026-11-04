@@ -972,3 +972,78 @@ kbd {
   border-radius: var(--radius);
   color: var(--ok);
 }
+
+/* Export menu (US-05) */
+.menu {
+  position: relative;
+}
+.menu-caret {
+  margin-left: 6px;
+}
+.menu-list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  min-width: 200px;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+}
+.menu-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: var(--panel-2);
+}
+.menu-error {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  white-space: nowrap;
+}
+
+/* Print / PDF: only the score, on white (the viewer switches alphaTab to the light palette). */
+@media print {
+  .sidenav,
+  .tab-actions,
+  .player,
+  .player-status,
+  .warn-note,
+  .chip-accent {
+    display: none !important;
+  }
+  html,
+  body,
+  .shell,
+  .content {
+    background: #fff !important;
+    color: #000 !important;
+  }
+  .content {
+    padding: 0 !important;
+  }
+  .chip {
+    background: transparent !important;
+    color: #000 !important;
+    border: 1px solid #999 !important;
+  }
+  .score-card {
+    background: #fff !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+}
