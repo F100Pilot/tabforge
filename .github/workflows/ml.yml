@@ -1,0 +1,49 @@
+name: ML integration
+
+# Real model inference (Basic Pitch ONNX) with the ml/eval extras. Kept out of the fast CI
+# because it installs torch. Guards the ADR-0002 dependency overrides: runs whenever the
+# worker's dependencies or ML adapters change, weekly, and on demand.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 3 * * 1"
+  push:
+    branches: [main]
+    paths:
+      - services/worker/pyproject.toml
+      - services/worker/uv.lock
+      - services/worker/src/tabforge_worker/adapters/**
+      - services/worker/src/tabforge_worker/evaluation/**
+      - services/worker/tests/**
+      - services/worker/eval/**
+      - .github/workflows/ml.yml
+  pull_request:
+    paths:
+      - services/worker/pyproject.toml
+      - services/worker/uv.lock
+      - services/worker/src/tabforge_worker/adapters/**
+      - services/worker/src/tabforge_worker/evaluation/**
+      - services/worker/tests/**
+      - services/worker/eval/**
+      - .github/workflows/ml.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ml-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  worker-ml:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: services/worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen --extra ml --extra eval
+      - run: uv run mypy src tests eval
+      - run: uv run pytest -q -m ml

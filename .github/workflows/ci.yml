@@ -52,7 +52,7 @@ jobs:
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      - run: uv run mypy src tests
+      - run: uv run mypy src tests $(test -d eval && echo eval)
       - run: uv run pytest -q
       - name: Dependency audit (incl. ML extras)
         run: |
