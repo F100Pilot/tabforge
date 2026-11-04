@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
-import { completeUpload, createUpload, putFile, type SourceKind } from "@/lib/api";
+import { completeUpload, createUpload, isUnauthenticated, putFile, type SourceKind } from "@/lib/api";
 import { checkFile } from "@/lib/file-checks";
 
 type Phase = "idle" | "preparing" | "uploading" | "finishing";
@@ -19,6 +20,8 @@ export function UploadForm() {
   const [file, setFile] = useState<File | null>(null);
   const [kind, setKind] = useState<SourceKind>("guitar_stem");
   const [error, setError] = useState<string | null>(null);
+  const [needsLogin, setNeedsLogin] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const busy = phase !== "idle";
 
@@ -34,6 +37,7 @@ export function UploadForm() {
       return;
     }
     setError(null);
+    setNeedsLogin(false);
     try {
       setPhase("preparing");
       const ticket = await createUpload(file, kind);
@@ -43,31 +47,60 @@ export function UploadForm() {
       const job = await completeUpload(ticket.audio_id);
       router.push(`/jobs/${encodeURIComponent(job.id)}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ocorreu um erro inesperado.");
+      setError(
+        isUnauthenticated(err)
+          ? "Inicie sessão para continuar."
+          : err instanceof Error
+            ? err.message
+            : "Ocorreu um erro inesperado.",
+      );
+      setNeedsLogin(isUnauthenticated(err));
       setPhase("idle");
     }
   }
 
+  function pick(f: File | null) {
+    setFile(f);
+    setError(f ? checkFile(f) : null);
+  }
+
   return (
-    <form onSubmit={onSubmit} aria-busy={busy} className="stack">
-      <div className="field">
-        <label htmlFor="audio-file">Ficheiro de áudio (MP3, WAV, FLAC ou OGG, até 50 MiB)</label>
+    <form onSubmit={onSubmit} aria-busy={busy} className="card upload">
+      <label
+        htmlFor="audio-file"
+        className={`dropzone${dragging ? " dragging" : ""}${busy ? " disabled" : ""}`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (!busy) setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          if (!busy) pick(e.dataTransfer.files?.[0] ?? null);
+        }}
+      >
         <input
           id="audio-file"
+          className="sr-input"
           type="file"
           accept="audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/flac,audio/x-flac,audio/ogg,.mp3,.wav,.flac,.ogg"
           disabled={busy}
-          onChange={(e) => {
-            const f = e.target.files?.[0] ?? null;
-            setFile(f);
-            setError(f ? checkFile(f) : null);
-          }}
+          onChange={(e) => pick(e.target.files?.[0] ?? null)}
         />
-      </div>
+        <span className="dz-title">
+          {file ? file.name : "Largue o ficheiro aqui ou clique para escolher"}
+        </span>
+        <span className="chips">
+          <span className="chip">MP3 · WAV · FLAC · OGG</span>
+          <span className="chip">até 50 MB</span>
+          <span className="chip">até 10 min</span>
+        </span>
+      </label>
 
-      <fieldset disabled={busy}>
+      <fieldset disabled={busy} className="segmented">
         <legend>Tipo de gravação</legend>
-        <label className="radio">
+        <label className="seg">
           <input
             type="radio"
             name="source_kind"
@@ -75,9 +108,12 @@ export function UploadForm() {
             checked={kind === "guitar_stem"}
             onChange={() => setKind("guitar_stem")}
           />
-          Guitarra isolada
+          <span className="seg-body">
+            <strong>Só a guitarra</strong>
+            <span>Recomendado · mais rápido e fiel</span>
+          </span>
         </label>
-        <label className="radio">
+        <label className="seg">
           <input
             type="radio"
             name="source_kind"
@@ -85,11 +121,16 @@ export function UploadForm() {
             checked={kind === "mix"}
             onChange={() => setKind("mix")}
           />
-          Mistura com banda
+          <span className="seg-body">
+            <strong>Guitarra com banda</strong>
+            <span>Isolamos a guitarra · em avaliação</span>
+          </span>
         </label>
       </fieldset>
 
-      <button type="submit" disabled={busy}>
+      <p className="note">Privado · o áudio é apagado ao fim de 30 dias</p>
+
+      <button type="submit" className="btn btn-primary btn-block" disabled={busy}>
         Gerar tablatura
       </button>
 
@@ -99,10 +140,11 @@ export function UploadForm() {
       <p role="alert" className="error">
         {error}
       </p>
-
-      <p className="note">
-        Os seus ficheiros são privados: as tabs são privadas por defeito.
-      </p>
+      {needsLogin && (
+        <Link href="/login" className="btn btn-primary btn-block">
+          Iniciar sessão
+        </Link>
+      )}
     </form>
   );
 }

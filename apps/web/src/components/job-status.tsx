@@ -3,26 +3,30 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { getJob, type Job, type JobStage, type JobStatus } from "@/lib/api";
+import { getJob, isUnauthenticated, listJobs, type Job, type SourceKind } from "@/lib/api";
+import { SignInPrompt } from "./sign-in-prompt";
+import { errorMessage, STEPS, stepHint, stepStates } from "@/lib/job-view";
 
 const POLL_MS = 2000;
-
-const STATUS_LABEL: Record<JobStatus, string> = {
-  queued: "Na fila de espera",
-  running: "Em processamento",
-  done: "Concluído",
-  failed: "Falhou",
-};
-const STAGE_LABEL: Record<JobStage, string> = {
-  separating: "A separar a guitarra do resto da música",
-  transcribing: "A transcrever as notas",
-  arranging: "A arranjar a tablatura",
-};
 
 export function JobStatusView({ jobId }: { jobId: string }) {
   const router = useRouter();
   const [job, setJob] = useState<Job | null>(null);
+  const [sourceKind, setSourceKind] = useState<SourceKind | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [needsLogin, setNeedsLogin] = useState(false);
+
+  // source_kind is only exposed by the list endpoint; best effort, once.
+  useEffect(() => {
+    const ctrl = new AbortController();
+    listJobs(100, ctrl.signal)
+      .then((items) => {
+        const found = items.find((i) => i.id === jobId);
+        if (found) setSourceKind(found.source_kind);
+      })
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [jobId]);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -41,6 +45,10 @@ export function JobStatusView({ jobId }: { jobId: string }) {
         if (j.status === "failed") return;
       } catch (err) {
         if (ctrl.signal.aborted) return;
+        if (isUnauthenticated(err)) {
+          setNeedsLogin(true);
+          return;
+        }
         setError(err instanceof Error ? err.message : "Erro ao consultar o estado.");
       }
       timer = setTimeout(poll, POLL_MS);
@@ -53,30 +61,58 @@ export function JobStatusView({ jobId }: { jobId: string }) {
     };
   }, [jobId, router]);
 
+  if (needsLogin) return <SignInPrompt />;
+
+  if (job?.status === "failed") {
+    return (
+      <div className="card center-card" role="alert">
+        <h1>Não foi possível gerar a tablatura</h1>
+        <p className="error-text">{errorMessage(job.error_code)}</p>
+        <Link href="/" className="btn btn-primary">
+          Carregar outro ficheiro
+        </Link>
+      </div>
+    );
+  }
+
+  const states = job ? stepStates(job.status, job.stage, sourceKind) : null;
+
   return (
-    <div className="stack">
-      <div role="status" aria-live="polite" className="status">
+    <div className="card center-card">
+      <h1>A processar a gravação</h1>
+      <div role="status" aria-live="polite">
         {job ? (
-          <>
-            <p>
-              Estado: <strong>{STATUS_LABEL[job.status]}</strong>
-            </p>
-            {job.status === "running" && job.stage && <p>{STAGE_LABEL[job.stage]}…</p>}
-            {job.status === "done" && <p>A abrir a tablatura…</p>}
-            {job.status === "failed" && (
-              <p className="error">
-                A transcrição falhou (código: <code>{job.error_code ?? "desconhecido"}</code>).
-              </p>
-            )}
-          </>
+          <p className="muted">
+            {job.status === "queued" ? "Em fila" : job.status === "done" ? "A abrir a tablatura…" : "Em processamento"}
+          </p>
         ) : (
-          <p>A carregar o estado…</p>
+          <p className="muted">A carregar o estado…</p>
         )}
       </div>
-      <p role="alert" className="error">
-        {error}
-      </p>
-      {job?.status === "failed" && <Link href="/">Tentar com outro ficheiro</Link>}
+      <ol className="stepper" aria-label="Progresso">
+        {STEPS.map((step, i) => {
+          const st = states?.[i] ?? "pending";
+          return (
+            <li key={step.stage} className={`step step-${st}`} aria-current={st === "current" ? "step" : undefined}>
+              <span className="step-marker" aria-hidden="true">
+                {st === "done" ? "✓" : st === "skipped" ? "–" : i + 1}
+              </span>
+              <span className="step-label">{step.label}</span>
+              <span className="step-hint">{stepHint(i, st, sourceKind)}</span>
+              <span className="sr-only">
+                {st === "done" ? " (concluído)" : st === "current" ? " (em curso)" : st === "skipped" ? " (saltado)" : ""}
+              </span>
+              {st === "current" && <span className="bar" aria-hidden="true"><span /></span>}
+            </li>
+          );
+        })}
+      </ol>
+      <p className="note">Pode sair desta página: a tab aparece em As minhas tabs quando estiver pronta.</p>
+      {error && (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

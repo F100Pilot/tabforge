@@ -3,12 +3,11 @@ import { JobStatusView } from "@/components/job-status";
 
 export default function JobPage({ params }: PageProps<"/jobs/[id]">) {
   return (
-    <main>
-      <h1>A processar a gravação</h1>
-      <Suspense fallback={<p>A carregar…</p>}>
+    <div className="page narrow">
+      <Suspense fallback={<p className="muted">A carregar…</p>}>
         <JobContent params={params} />
       </Suspense>
-    </main>
+    </div>
   );
 }
 

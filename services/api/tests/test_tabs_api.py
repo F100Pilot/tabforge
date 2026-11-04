@@ -3,6 +3,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
+from tabforge_score import Score
 
 pytestmark = pytest.mark.db
 
@@ -48,7 +49,9 @@ def test_get_tab_returns_score_and_alphatex(client: TestClient, engine: Engine) 
     body = resp.json()
     assert body["visibility"] == "private"
     assert body["revision"]["source"] == "ai"
-    assert body["revision"]["score"] == SCORE
+    # Returned normalized: v2 fields appear with their defaults.
+    assert body["revision"]["score"] == Score.model_validate(SCORE).model_dump(mode="json")
+    assert body["revision"]["score"]["bars"][0]["beats"][0]["dots"] == 0
     assert body["alphatex"].startswith('\\title "Riff \\"1\\"" \\tempo 100 ')
     assert body["alphatex"].endswith("3.6.1 |")
 

@@ -29,7 +29,8 @@ SET status = 'running', stage = NULL, error_code = NULL,
     attempts = jobs.attempts + 1, locked_at = now(), updated_at = now()
 FROM next, audio_assets a
 WHERE jobs.id = next.id AND a.id = jobs.audio_id
-RETURNING jobs.id, jobs.audio_id, jobs.attempts, a.source_kind, a.user_id
+RETURNING jobs.id, jobs.audio_id, jobs.attempts, a.source_kind, a.user_id,
+          a.storage_key, a.content_type
 """
 
 
@@ -40,6 +41,8 @@ class ClaimedJob:
     attempts: int
     source_kind: str
     owner_id: uuid.UUID
+    storage_key: str
+    content_type: str
 
 
 def claim_next(conn: psycopg.Connection[Any], lease_s: int, max_attempts: int) -> ClaimedJob | None:
@@ -65,10 +68,33 @@ def set_stage(conn: psycopg.Connection[Any], job_id: uuid.UUID, stage: str) -> N
         )
 
 
-def complete(conn: psycopg.Connection[Any], job: ClaimedJob, score: dict[str, Any]) -> uuid.UUID:
-    """Store the generated tab and its first revision, and mark the job done (one transaction)."""
+def complete(
+    conn: psycopg.Connection[Any],
+    job: ClaimedJob,
+    score: dict[str, Any],
+    duration_ms: int | None = None,
+    sha256: str | None = None,
+) -> uuid.UUID | None:
+    """Store the generated tab and its first revision, and mark the job done (one transaction).
+
+    Returns None, storing nothing, when the owner deleted their account meanwhile (US-07): the
+    job is gone with them. KEY SHARE on the user row orders this against a concurrent delete
+    (which waits, then cascades to the new tab) instead of deadlocking on the tab's foreign key.
+    """
     title = f"Transcrição {datetime.now(UTC):%Y-%m-%d}"
     with conn.transaction():
+        owner = conn.execute(
+            "SELECT 1 FROM users u JOIN audio_assets a ON a.user_id = u.id "
+            "JOIN jobs j ON j.audio_id = a.id WHERE j.id = %s FOR KEY SHARE OF u",
+            (job.id,),
+        ).fetchone()
+        if owner is None:
+            return None
+        conn.execute(
+            "UPDATE audio_assets SET duration_ms = COALESCE(%s, duration_ms), "
+            "sha256 = COALESCE(%s, sha256) WHERE id = %s",
+            (duration_ms, sha256, job.audio_id),
+        )
         tab_id = _scalar(
             conn,
             "INSERT INTO tabs (owner_id, title) VALUES (%s, %s) RETURNING id",

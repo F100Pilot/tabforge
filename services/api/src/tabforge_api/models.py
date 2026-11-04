@@ -27,10 +27,10 @@ NAMING = {
     "pk": "pk_%(table_name)s",
 }
 
-AUDIO_STATUSES = ("pending_upload", "uploaded", "rejected")
+AUDIO_STATUSES = ("pending_upload", "uploaded", "rejected", "expired")
 AUDIO_SOURCE_KINDS = ("mix", "guitar_stem")
 JOB_STATUSES = ("queued", "running", "done", "failed")
-JOB_STAGES = ("separating", "transcribing", "arranging")
+JOB_STAGES = ("normalizing", "separating", "transcribing", "arranging")
 TAB_VISIBILITIES = ("private", "unlisted", "public")
 REVISION_SOURCES = ("ai", "user")
 
@@ -65,6 +65,34 @@ class User(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (Index("uq_users_email_lower", func.lower(email), unique=True),)
+
+
+class LoginToken(Base):
+    """Single-use magic-link token (US-07). Only the SHA-256 of the token is stored."""
+
+    __tablename__ = "login_tokens"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    email: Mapped[str] = mapped_column(Text, nullable=False)  # lowercased
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    created_at: Mapped[datetime] = _created_at()
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AuthSession(Base):
+    """Opaque server-side session (ADR-0006). The cookie value is stored only as SHA-256."""
+
+    __tablename__ = "sessions"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    csrf_token: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = _created_at()
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class AudioAsset(Base):

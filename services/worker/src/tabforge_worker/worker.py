@@ -6,19 +6,16 @@ import os
 import signal
 import sys
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
 from types import FrameType
-from typing import Any
+from typing import Any, Literal
 
 import psycopg
 
-from tabforge_worker import queue
-from tabforge_worker.pipeline import STUB_SCORE, Stage, plan_stages
+from tabforge_worker import queue, retention
+from tabforge_worker.pipeline import Pipeline, PipelineError, Stage, StubPipeline
 
 log = logging.getLogger("tabforge_worker")
-
-StageRunner = Callable[[Stage, queue.ClaimedJob], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +24,8 @@ class WorkerConfig:
     poll_interval_s: float = 2.0
     lease_s: int = 600
     max_attempts: int = 3
+    pipeline: Literal["stub", "real"] = "stub"
+    retention_interval_s: float = 3600.0
 
     @classmethod
     def from_env(cls) -> "WorkerConfig":
@@ -38,34 +37,63 @@ class WorkerConfig:
             poll_interval_s=float(os.environ.get("TABFORGE_WORKER_POLL_INTERVAL_S", "2")),
             lease_s=int(os.environ.get("TABFORGE_WORKER_LEASE_S", "600")),
             max_attempts=int(os.environ.get("TABFORGE_WORKER_MAX_ATTEMPTS", "3")),
+            pipeline=_pipeline_kind(os.environ.get("TABFORGE_WORKER_PIPELINE", "stub")),
+            retention_interval_s=float(os.environ.get("TABFORGE_WORKER_RETENTION_S", "3600")),
         )
 
 
-def stub_stage(stage: Stage, job: queue.ClaimedJob) -> None:
-    """M1: no audio processing; the arranging step writes STUB_SCORE."""
+def _pipeline_kind(value: str) -> Literal["stub", "real"]:
+    if value == "stub":
+        return "stub"
+    if value == "real":
+        return "real"
+    raise SystemExit(f"TABFORGE_WORKER_PIPELINE must be stub or real, got {value!r}")
 
 
-def run_once(
-    conn: psycopg.Connection[Any],
-    config: WorkerConfig,
-    run_stage: StageRunner = stub_stage,
-    score: dict[str, Any] = STUB_SCORE,
-) -> bool:
+def build_pipeline(kind: Literal["stub", "real"]) -> Pipeline:
+    if kind == "stub":
+        return StubPipeline()
+    # Heavy ML imports only when the real pipeline is selected (needs the `ml` extra).
+    from tabforge_worker.adapters.basic_pitch import BasicPitchOnnxTranscriber
+    from tabforge_worker.adapters.demucs import DemucsGuitarSeparator
+    from tabforge_worker.adapters.librosa_beats import LibrosaBeatTracker
+    from tabforge_worker.adapters.s3_source import S3AudioSource
+    from tabforge_worker.real_pipeline import RealPipeline
+
+    return RealPipeline(
+        source=S3AudioSource.from_env(),
+        transcriber=BasicPitchOnnxTranscriber,
+        separator=DemucsGuitarSeparator,
+        beat_tracker=LibrosaBeatTracker,
+    )
+
+
+def run_once(conn: psycopg.Connection[Any], config: WorkerConfig, pipeline: Pipeline) -> bool:
     """Process at most one job. Returns False when the queue was empty."""
     job = queue.claim_next(conn, config.lease_s, config.max_attempts)
     if job is None:
         return False
-    stage: Stage | None = None
+    current: list[Stage] = []
+
+    def on_stage(stage: Stage) -> None:
+        current.append(stage)
+        queue.set_stage(conn, job.id, stage.value)
+        log.info(_event("stage_started", job=job.id, stage=stage.value))
+
     try:
-        for stage in plan_stages(job.source_kind):
-            queue.set_stage(conn, job.id, stage.value)
-            log.info(_event("stage_started", job=job.id, stage=stage.value))
-            run_stage(stage, job)
-        tab_id = queue.complete(conn, job, score)
+        result = pipeline.process(job, on_stage)
+        tab_id = queue.complete(conn, job, result.score, result.duration_ms, result.sha256)
+    except PipelineError as exc:
+        log.warning(_event("job_failed", job=job.id, error_code=exc.code))
+        queue.fail(conn, job.id, exc.code)
+        return True
     except Exception:
-        code = f"{stage.value}_failed" if stage else "pipeline_failed"
+        code = f"{current[-1].value}_failed" if current else "pipeline_failed"
         log.exception(_event("job_failed", job=job.id, error_code=code))
         queue.fail(conn, job.id, code)
+        return True
+    if tab_id is None:
+        log.info(_event("job_gone", job=job.id))  # owner deleted their account mid-job
         return True
     log.info(_event("job_done", job=job.id, tab=tab_id))
     return True
@@ -88,12 +116,29 @@ def main() -> int:
 
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT, _stop)
-    log.info(_event("worker_started", lease_s=config.lease_s, max_attempts=config.max_attempts))
+    pipeline = build_pipeline(config.pipeline)
+    from tabforge_worker.adapters.s3_source import S3AudioSource
+
+    store = S3AudioSource.from_env()
+    next_purge = 0.0
+    log.info(
+        _event(
+            "worker_started",
+            lease_s=config.lease_s,
+            max_attempts=config.max_attempts,
+            pipeline=config.pipeline,
+        )
+    )
     while not stopping:
         try:
             with psycopg.connect(config.database_url, autocommit=True) as conn:
                 while not stopping:
-                    if not run_once(conn, config):
+                    if time.monotonic() >= next_purge:
+                        purged = retention.purge_expired(conn, store)
+                        auth_purged = retention.purge_auth(conn)
+                        log.info(_event("retention_run", purged=purged, auth_purged=auth_purged))
+                        next_purge = time.monotonic() + config.retention_interval_s
+                    if not run_once(conn, config, pipeline):
                         time.sleep(config.poll_interval_s)
         except psycopg.OperationalError:
             log.exception(_event("database_unavailable"))

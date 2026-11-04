@@ -1,0 +1,13 @@
+# Build context is the repository root (ADR-0005). Keep it small and free of data/secrets.
+.git
+.env
+.env.*
+data/
+**/node_modules
+**/.venv
+**/.next
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+apps/web/public/alphatab

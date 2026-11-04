@@ -3,11 +3,11 @@ import { TabViewer } from "@/components/tab-viewer";
 
 export default function TabPage({ params }: PageProps<"/tabs/[id]">) {
   return (
-    <main className="wide">
-      <Suspense fallback={<p>A carregar…</p>}>
+    <div className="page wide">
+      <Suspense fallback={<p className="muted">A carregar…</p>}>
         <TabContent params={params} />
       </Suspense>
-    </main>
+    </div>
   );
 }
 

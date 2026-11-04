@@ -3,7 +3,7 @@ import { declaredType, type FileLike } from "./file-checks";
 
 export type SourceKind = "mix" | "guitar_stem";
 export type JobStatus = "queued" | "running" | "done" | "failed";
-export type JobStage = "separating" | "transcribing" | "arranging";
+export type JobStage = "normalizing" | "separating" | "transcribing" | "arranging";
 
 export interface UploadTicket {
   audio_id: string;
@@ -22,6 +22,33 @@ export interface Job {
   tab_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface JobSummary extends Job {
+  source_kind: SourceKind;
+  duration_ms: number | null;
+  tab_title: string | null;
+}
+
+export interface TabSummary {
+  id: string;
+  title: string;
+  tuning: unknown;
+  visibility: string;
+  created_at: string;
+}
+
+export interface ScoreWarning {
+  bar: number;
+  code: string;
+  pitch: number;
+}
+
+/** The subset of Score v1/v2 the UI reads. */
+export interface ScoreInfo {
+  tempo_bpm: number | null;
+  time_signature: [number, number] | null;
+  warnings: ScoreWarning[];
 }
 
 export interface Tab {
@@ -60,7 +87,7 @@ const isRec = (v: unknown): v is Rec => typeof v === "object" && v !== null && !
 const isStr = (v: unknown): v is string => typeof v === "string";
 const isNullableStr = (v: unknown): v is string | null => v === null || isStr(v);
 const JOB_STATUSES: readonly string[] = ["queued", "running", "done", "failed"];
-const JOB_STAGES: readonly string[] = ["separating", "transcribing", "arranging"];
+const JOB_STAGES: readonly string[] = ["normalizing", "separating", "transcribing", "arranging"];
 
 export function parseUploadTicket(v: unknown): UploadTicket {
   if (
@@ -113,6 +140,68 @@ export function parseTab(v: unknown): Tab {
   return v as unknown as Tab;
 }
 
+export function parseJobSummary(v: unknown): JobSummary {
+  const job = parseJob(v);
+  const r = v as Rec;
+  if (
+    (r.source_kind !== "mix" && r.source_kind !== "guitar_stem") ||
+    !(r.duration_ms === null || typeof r.duration_ms === "number") ||
+    !isNullableStr(r.tab_title)
+  ) {
+    throw new ResponseShapeError("job summary");
+  }
+  return { ...job, source_kind: r.source_kind, duration_ms: r.duration_ms, tab_title: r.tab_title };
+}
+
+export function parseJobList(v: unknown): JobSummary[] {
+  if (!isRec(v) || !Array.isArray(v.items)) throw new ResponseShapeError("job list");
+  return v.items.map(parseJobSummary);
+}
+
+export function parseTabSummary(v: unknown): TabSummary {
+  if (
+    !isRec(v) ||
+    !isStr(v.id) ||
+    !isStr(v.title) ||
+    !isStr(v.visibility) ||
+    !isStr(v.created_at)
+  ) {
+    throw new ResponseShapeError("tab summary");
+  }
+  return v as unknown as TabSummary;
+}
+
+export function parseTabList(v: unknown): TabSummary[] {
+  if (!isRec(v) || !Array.isArray(v.items)) throw new ResponseShapeError("tab list");
+  return v.items.map(parseTabSummary);
+}
+
+/** Tolerant reader for the score fields the viewer shows; unknown/missing fields degrade to null/[]. */
+export function readScoreInfo(score: unknown): ScoreInfo {
+  const r = isRec(score) ? score : {};
+  const ts = r.time_signature;
+  const timeSig =
+    Array.isArray(ts) &&
+    ts.length === 2 &&
+    typeof ts[0] === "number" &&
+    typeof ts[1] === "number" &&
+    ts[0] > 0 &&
+    ts[1] > 0
+      ? ([ts[0], ts[1]] as [number, number])
+      : null;
+  const warnings = Array.isArray(r.warnings)
+    ? r.warnings.filter(
+        (w): w is ScoreWarning =>
+          isRec(w) && typeof w.bar === "number" && isStr(w.code) && typeof w.pitch === "number",
+      )
+    : [];
+  return {
+    tempo_bpm: typeof r.tempo_bpm === "number" && r.tempo_bpm > 0 ? r.tempo_bpm : null,
+    time_signature: timeSig,
+    warnings,
+  };
+}
+
 export function parseProblem(status: number, body: unknown): ProblemError {
   if (isRec(body) && isStr(body.detail) && isStr(body.code)) {
     return new ProblemError({
@@ -135,8 +224,69 @@ export function apiBaseUrl(): URL {
   return parsePublicConfig({ NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL }).apiBaseUrl;
 }
 
+export interface SessionUser {
+  id: string;
+  email: string;
+}
+
+export interface Session {
+  user: SessionUser;
+  csrf_token: string | null;
+}
+
+const UNSAFE_METHODS: readonly string[] = ["POST", "PUT", "PATCH", "DELETE"];
+
+/** Adds `X-CSRF-Token` on unsafe methods when a token is known; never mutates `base`. */
+export function csrfHeaders(method: string, base: HeadersInit | undefined, token: string | null): Headers {
+  const headers = new Headers(base);
+  if (token !== null && UNSAFE_METHODS.includes(method.toUpperCase())) {
+    headers.set("X-CSRF-Token", token);
+  }
+  return headers;
+}
+
+let csrfToken: string | null = null;
+
+/** Called with the `csrf_token` from every session/verify response (null clears it). */
+export function setCsrfToken(token: string | null): void {
+  csrfToken = token;
+}
+
+export function getCsrfToken(): string | null {
+  return csrfToken;
+}
+
+/** True for the API's 401 `unauthenticated` problem (also any 401). */
+export function isUnauthenticated(err: unknown): boolean {
+  return err instanceof ProblemError && err.status === 401;
+}
+
+export function parseSession(v: unknown): Session {
+  if (
+    !isRec(v) ||
+    !isRec(v.user) ||
+    !isStr(v.user.id) ||
+    !isStr(v.user.email) ||
+    !isNullableStr(v.csrf_token ?? null)
+  ) {
+    throw new ResponseShapeError("session");
+  }
+  return { user: { id: v.user.id, email: v.user.email }, csrf_token: (v.csrf_token as string | null | undefined) ?? null };
+}
+
+/** Accepts any JSON object (the 202 body is `{}`); rejects anything else. */
+export function parseEmptyObject(v: unknown, what: string): void {
+  if (v !== undefined && !isRec(v)) throw new ResponseShapeError(what);
+}
+
 async function request(path: string, init?: RequestInit): Promise<unknown> {
-  const res = await fetch(new URL(path, apiBaseUrl()), { cache: "no-store", ...init });
+  const method = init?.method ?? "GET";
+  const res = await fetch(new URL(path, apiBaseUrl()), {
+    cache: "no-store",
+    ...init,
+    credentials: "include",
+    headers: csrfHeaders(method, init?.headers, csrfToken),
+  });
   let body: unknown = undefined;
   try {
     body = await res.json();
@@ -196,4 +346,113 @@ export async function getJob(id: string, signal?: AbortSignal) {
 
 export async function getTab(id: string, signal?: AbortSignal) {
   return parseTab(await request(`/v1/tabs/${encodeURIComponent(id)}`, { signal }));
+}
+
+export async function listJobs(limit: number, signal?: AbortSignal) {
+  return parseJobList(await request(`/v1/jobs?limit=${encodeURIComponent(String(limit))}`, { signal }));
+}
+
+export async function listTabs(limit: number, signal?: AbortSignal) {
+  return parseTabList(await request(`/v1/tabs?limit=${encodeURIComponent(String(limit))}`, { signal }));
+}
+
+export interface RevisionSummary {
+  id: string;
+  source: "ai" | "user";
+  created_at: string;
+}
+
+export function parseRevisionList(v: unknown): RevisionSummary[] {
+  if (!isRec(v) || !Array.isArray(v.items)) throw new ResponseShapeError("revision list");
+  return v.items.map((it) => {
+    if (!isRec(it) || !isStr(it.id) || (it.source !== "ai" && it.source !== "user") || !isStr(it.created_at)) {
+      throw new ResponseShapeError("revision");
+    }
+    return { id: it.id, source: it.source, created_at: it.created_at };
+  });
+}
+
+export function parsePreview(v: unknown): string {
+  if (!isRec(v) || !isStr(v.alphatex)) throw new ResponseShapeError("preview");
+  return v.alphatex;
+}
+
+const JSON_HEADERS = { "Content-Type": "application/json" };
+
+/** Server-side alphaTex for an edited score (also validates it: 422 `validation_error`). */
+export async function previewScore(tabId: string, score: unknown, signal?: AbortSignal) {
+  return parsePreview(
+    await request(`/v1/tabs/${encodeURIComponent(tabId)}/preview`, {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ score }),
+      signal,
+    }),
+  );
+}
+
+/** Saves a new current revision. 409 `revision_conflict` when `baseRevisionId` is no longer current. */
+export async function saveRevision(tabId: string, baseRevisionId: string, score: unknown) {
+  return parseTab(
+    await request(`/v1/tabs/${encodeURIComponent(tabId)}/revisions`, {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ base_revision_id: baseRevisionId, score }),
+    }),
+  );
+}
+
+export async function listRevisions(tabId: string, signal?: AbortSignal) {
+  return parseRevisionList(await request(`/v1/tabs/${encodeURIComponent(tabId)}/revisions`, { signal }));
+}
+
+/** Asks for a login link by email. Always resolves for a valid address (the API never reveals if it exists). */
+export async function requestMagicLink(email: string): Promise<void> {
+  parseEmptyObject(
+    await request("/v1/auth/magic-link", {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ email }),
+    }),
+    "magic-link",
+  );
+}
+
+/** Exchanges the emailed token for a session cookie. 400 `invalid_token` when expired/used/unknown. */
+export async function verifyLogin(token: string): Promise<Session> {
+  const session = parseSession(
+    await request("/v1/auth/verify", {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ token }),
+    }),
+  );
+  setCsrfToken(session.csrf_token);
+  return session;
+}
+
+/** Current session, or null when anonymous (401). */
+export async function getSession(signal?: AbortSignal): Promise<Session | null> {
+  try {
+    const session = parseSession(await request("/v1/auth/session", { signal }));
+    setCsrfToken(session.csrf_token);
+    return session;
+  } catch (err) {
+    if (isUnauthenticated(err)) {
+      setCsrfToken(null);
+      return null;
+    }
+    throw err;
+  }
+}
+
+export async function logout(): Promise<void> {
+  await request("/v1/auth/logout", { method: "POST" });
+  setCsrfToken(null);
+}
+
+/** Permanently deletes the account, audio and tabs. 503 `storage_unavailable` → retry later. */
+export async function deleteAccount(): Promise<void> {
+  await request("/v1/me", { method: "DELETE" });
+  setCsrfToken(null);
 }

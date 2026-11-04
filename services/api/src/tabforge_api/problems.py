@@ -11,14 +11,19 @@ PROBLEM_JSON = "application/problem+json"
 
 
 class ProblemError(Exception):
-    def __init__(self, status: int, code: str, detail: str) -> None:
+    def __init__(
+        self, status: int, code: str, detail: str, headers: dict[str, str] | None = None
+    ) -> None:
         super().__init__(detail)
         self.status = status
         self.code = code
         self.detail = detail
+        self.headers = headers or {}
 
 
-def _problem(status: int, code: str, detail: str) -> JSONResponse:
+def _problem(
+    status: int, code: str, detail: str, headers: dict[str, str] | None = None
+) -> JSONResponse:
     body = {
         "type": "about:blank",
         "title": HTTPStatus(status).phrase,
@@ -26,13 +31,13 @@ def _problem(status: int, code: str, detail: str) -> JSONResponse:
         "detail": detail,
         "code": code,
     }
-    return JSONResponse(body, status_code=status, media_type=PROBLEM_JSON)
+    return JSONResponse(body, status_code=status, media_type=PROBLEM_JSON, headers=headers)
 
 
 def install_problem_handlers(app: FastAPI) -> None:
     @app.exception_handler(ProblemError)
     async def _on_problem(_: Request, exc: ProblemError) -> JSONResponse:
-        return _problem(exc.status, exc.code, exc.detail)
+        return _problem(exc.status, exc.code, exc.detail, exc.headers)
 
     @app.exception_handler(RequestValidationError)
     async def _on_validation(_: Request, exc: RequestValidationError) -> JSONResponse:

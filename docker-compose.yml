@@ -24,24 +24,30 @@ services:
     ports: ["127.0.0.1:7070:7070"]
     volumes: [s3data:/data]
 
+  # Dev SMTP sink for login links (US-07, ADR-0006). Inbox UI: http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:v1.31.6
+    ports: ["127.0.0.1:8025:8025", "127.0.0.1:1025:1025"]
+
   # One-shot: apply migrations and create the bucket (with CORS for the web origin).
   migrate:
-    build: ./services/api
+    build: { context: ., dockerfile: services/api/Dockerfile }
     env_file: .env
-    command: ["sh", "-c", "uv run --no-sync alembic upgrade head && uv run --no-sync python -m tabforge_api.cli init-storage"]
+    command: ["sh", "-c", "alembic upgrade head && python -m tabforge_api.cli init-storage"]
     depends_on:
       postgres: { condition: service_healthy }
       s3: { condition: service_started }
 
   api:
-    build: ./services/api
+    build: { context: ., dockerfile: services/api/Dockerfile }
     env_file: .env
     ports: ["127.0.0.1:8000:8000"]
     depends_on:
       migrate: { condition: service_completed_successfully }
+      mailpit: { condition: service_started }
 
   worker:
-    build: ./services/worker
+    build: { context: ., dockerfile: services/worker/Dockerfile }
     env_file: .env
     depends_on:
       migrate: { condition: service_completed_successfully }

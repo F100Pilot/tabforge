@@ -14,7 +14,7 @@ import pytest
 
 TEST_DB_ENV = "TABFORGE_TEST_DATABASE_URL"
 API_DIR = Path(__file__).resolve().parents[2] / "api"
-TABLES = "jobs, tab_revisions, tabs, audio_assets, users"
+TABLES = "sessions, login_tokens, jobs, tab_revisions, tabs, audio_assets, users"
 
 
 @pytest.fixture(scope="session")

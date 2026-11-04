@@ -1,0 +1,138 @@
+"""RealPipeline control flow with fake models (no ML needed); real ffmpeg for audio checks."""
+
+import hashlib
+import shutil
+import uuid
+from pathlib import Path
+
+import pytest
+from tabforge_score import Score
+from test_media import write_tone
+
+from tabforge_worker.pipeline import PipelineError, Stage
+from tabforge_worker.ports import NoteEvent
+from tabforge_worker.queue import ClaimedJob
+from tabforge_worker.real_pipeline import RealPipeline
+
+pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+
+
+class FakeSource:
+    def __init__(self, maker) -> None:  # type: ignore[no-untyped-def]
+        self.maker = maker
+        self.keys: list[str] = []
+
+    def download(self, key: str, dst: Path) -> None:
+        self.keys.append(key)
+        self.maker(dst)
+
+
+class FakeTranscriber:
+    def __init__(self) -> None:
+        self.inputs: list[Path] = []
+
+    def transcribe(self, audio: Path) -> list[NoteEvent]:
+        self.inputs.append(audio)
+        return [NoteEvent(0.0, 0.5, 64, 90), NoteEvent(0.5, 1.0, 69, 90)]
+
+
+class FakeBeats:
+    def beats(self, audio: Path) -> list[float]:
+        return [0.0, 0.5, 1.0, 1.5]
+
+
+class FakeSeparator:
+    def __init__(self) -> None:
+        self.inputs: list[Path] = []
+
+    def isolate_guitar(self, audio: Path, workdir: Path) -> Path:
+        self.inputs.append(audio)
+        out = workdir / "guitar.wav"
+        shutil.copy(audio, out)
+        return out
+
+
+def _job(kind: str) -> ClaimedJob:
+    return ClaimedJob(uuid.uuid4(), uuid.uuid4(), 1, kind, uuid.uuid4(), "audio/u/a", "audio/wav")
+
+
+def _pipeline(
+    source: FakeSource, **kw: object
+) -> tuple[RealPipeline, FakeTranscriber, FakeSeparator]:
+    transcriber, separator = FakeTranscriber(), FakeSeparator()
+    pipe = RealPipeline(
+        source=source,
+        transcriber=lambda: transcriber,
+        separator=lambda: separator,
+        beat_tracker=lambda: FakeBeats(),
+        **kw,  # type: ignore[arg-type]
+    )
+    return pipe, transcriber, separator
+
+
+def test_guitar_stem_skips_separation_and_builds_score(tmp_path: Path) -> None:
+    expected_sha: list[str] = []
+
+    def make(dst: Path) -> None:
+        write_tone(dst, 2.0)
+        expected_sha.append(hashlib.sha256(dst.read_bytes()).hexdigest())
+
+    pipe, transcriber, separator = _pipeline(FakeSource(make))
+    seen: list[Stage] = []
+    result = pipe.process(_job("guitar_stem"), seen.append)
+
+    assert seen == [Stage.NORMALIZING, Stage.TRANSCRIBING, Stage.ARRANGING]
+    assert separator.inputs == []
+    assert transcriber.inputs and transcriber.inputs[0].name == "audio.wav"
+    assert result.duration_ms == pytest.approx(2000, abs=20)
+    assert result.sha256 == expected_sha[0]
+    score = Score.model_validate(result.score)
+    assert score.schema_version == 2
+    sounding = [
+        score.tuning[n.string - 1] + n.fret
+        for b in score.bars
+        for beat in b.beats
+        for n in beat.notes
+    ]
+    assert sounding == [64, 69]  # E4 then A4, whichever positions the Viterbi picked
+
+
+def test_mix_separates_before_transcribing(tmp_path: Path) -> None:
+    pipe, transcriber, separator = _pipeline(FakeSource(lambda dst: write_tone(dst, 1.0)))
+    seen: list[Stage] = []
+    pipe.process(_job("mix"), seen.append)
+    assert Stage.SEPARATING in seen
+    assert separator.inputs[0].name == "audio.wav"
+    assert transcriber.inputs[0].name == "guitar.wav"
+
+
+def test_too_long_audio_fails_before_transcription(tmp_path: Path) -> None:
+    pipe, transcriber, _ = _pipeline(
+        FakeSource(lambda dst: write_tone(dst, 2.0)), max_duration_s=1.0
+    )
+    with pytest.raises(PipelineError) as err:
+        pipe.process(_job("guitar_stem"), lambda _: None)
+    assert err.value.code == "audio_too_long"
+    assert transcriber.inputs == []
+
+
+def test_unreadable_audio(tmp_path: Path) -> None:
+    pipe, transcriber, _ = _pipeline(
+        FakeSource(lambda dst: dst.write_bytes(b"RIFF\x00\x00\x00\x00WAVE" + b"\x00" * 32))
+    )
+    with pytest.raises(PipelineError) as err:
+        pipe.process(_job("guitar_stem"), lambda _: None)
+    assert err.value.code == "audio_unreadable"
+    assert transcriber.inputs == []
+
+
+def test_temporary_files_are_removed(tmp_path: Path) -> None:
+    dirs: list[Path] = []
+
+    def make(dst: Path) -> None:
+        dirs.append(dst.parent)
+        write_tone(dst, 0.5)
+
+    pipe, _, _ = _pipeline(FakeSource(make))
+    pipe.process(_job("guitar_stem"), lambda _: None)
+    assert not dirs[0].exists()

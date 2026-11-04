@@ -16,6 +16,7 @@ on:
       - services/worker/src/tabforge_worker/evaluation/**
       - services/worker/tests/**
       - services/worker/eval/**
+      - packages/score/**
       - .github/workflows/ml.yml
   pull_request:
     paths:
@@ -25,6 +26,7 @@ on:
       - services/worker/src/tabforge_worker/evaluation/**
       - services/worker/tests/**
       - services/worker/eval/**
+      - packages/score/**
       - .github/workflows/ml.yml
 
 permissions:
