@@ -23,7 +23,7 @@
 
 ## M2 — MVP
 - [x] Wireframes (upload, progresso, viewer, editor) aprovados antes de começar a UI do M2 (Fase 2 do SDLC) — decisões em `docs/ui/design.md`
-- [ ] Tema da pauta claro/escuro à escolha do utilizador (preferência guardada; por defeito segue o tema da interface). alphaTab 1.9 `display.resources`, paletas validadas no render dos wireframes:
+- [x] Tema da pauta claro/escuro à escolha do utilizador (preferência guardada no browser). alphaTab 1.9 `display.resources`, paletas validadas no render dos wireframes:
   - escura: fundo `#14171C`, mainGlyph `#E6E8EB`, secondaryGlyph `#9AA1AC`, staffLine `#4A505B`, barSeparator `#8A919C`, barNumber `#F2B544`, scoreInfo `#C9CED6`
   - clara: fundo `#FAFAF7`, mainGlyph `#1B1D21`, secondaryGlyph `#6B7079`, staffLine `#A3A39B`, barSeparator `#4A4E55`, barNumber `#9A6A12`, scoreInfo `#1B1D21`
 - [x] Domínio: quantização rítmica (TDD), a partir de onsets e beats, sem depender de offsets do Basic Pitch (M0: F1 com offset de 0,55)
@@ -33,9 +33,9 @@
 - [ ] Login com Google (OAuth) (US-07) — adiado; reutiliza a mesma sessão (ADR-0006)
 - [ ] Eliminação de conta: um upload pré-assinado emitido antes do `DELETE /v1/me` pode ainda chegar ao storage (≤ 5 min) sem linha na BD. Fechar com regra de lifecycle do bucket para `audio/` órfãos ou limpeza por prefixo `audio/{user_id}/`
 - [ ] Rate limiting partilhado entre réplicas (Postgres/Redis) e IP real atrás de proxy (`--forwarded-allow-ips`) — hoje em memória por instância
-- [ ] Editor de tab com revisões (US-04)
+- [x] Editor de tab com revisões (US-04): traste/corda com ligaduras, anular/refazer, Ctrl+S, conflito 409, histórico de revisões. Edição de ritmo fica para o M3
 - [x] Quotas, rate limiting, retenção de áudio — 20 uploads/24 h, 30 escritas/min por utilizador (em memória, uma instância), worker apaga áudio expirado (30 dias) e uploads abandonados (>1 dia)
-- [ ] E2E Playwright: upload → tab → editar
+- [x] E2E Playwright no CI (job `e2e`, pipeline stub): login por link → upload → tab → editar e guardar → terminar sessão → eliminar conta
 
 ## M3 — Iterações
 - [ ] Export GP/MIDI (US-05)

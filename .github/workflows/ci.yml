@@ -87,6 +87,92 @@ jobs:
           uv export --frozen --all-extras --no-hashes --no-emit-project --no-emit-package tabforge-score > "$RUNNER_TEMP/req.txt"
           uvx pip-audit --strict --no-deps --disable-pip -r "$RUNNER_TEMP/req.txt"
 
+  e2e:
+    # Whole journey in Chromium against the real API, the stub worker and the built web app.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: tabforge
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: tabforge
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U tabforge -d tabforge" --health-interval 5s --health-retries 10
+      s3:
+        image: versity/versitygw:v1.9.0
+        env:
+          ROOT_ACCESS_KEY: tabforge
+          ROOT_SECRET_KEY: tabforge-dev-secret
+          VGW_BACKEND: posix
+          VGW_BACKEND_ARG: /data
+        ports: ["7070:7070"]
+        options: --tmpfs /data
+    env:
+      TABFORGE_ENV: dev
+      TABFORGE_DATABASE_URL: postgresql://tabforge:ci-only@localhost:5432/tabforge
+      TABFORGE_CORS_ORIGINS: '["http://localhost:3100"]'
+      TABFORGE_S3_ENDPOINT_URL: http://localhost:7070
+      TABFORGE_S3_PUBLIC_ENDPOINT_URL: http://localhost:7070
+      TABFORGE_S3_ACCESS_KEY: tabforge
+      TABFORGE_S3_SECRET_KEY: tabforge-dev-secret
+      TABFORGE_S3_BUCKET: tabforge-audio
+      TABFORGE_SESSION_COOKIE_SECURE: "false"
+      TABFORGE_WEB_BASE_URL: http://localhost:3100
+      TABFORGE_WORKER_PIPELINE: stub
+      TABFORGE_WORKER_POLL_INTERVAL_S: "0.5"
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "E2E_API_LOG=$RUNNER_TEMP/api.log" >> "$GITHUB_ENV"
+      - uses: astral-sh/setup-uv@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: apps/web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+      - name: API (migrate, bucket, serve; no SMTP, so login links go to the log)
+        working-directory: services/api
+        run: |
+          uv sync --frozen
+          uv run alembic upgrade head
+          uv run python -m tabforge_api.cli init-storage
+          nohup uv run uvicorn tabforge_api.main:create_app --factory --port 8000 > "$E2E_API_LOG" 2>&1 &
+      - name: Worker (stub pipeline)
+        working-directory: services/worker
+        run: |
+          uv sync --frozen
+          nohup uv run python -m tabforge_worker > "$RUNNER_TEMP/worker.log" 2>&1 &
+      - name: Web (build and serve)
+        working-directory: apps/web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+          pnpm build
+          nohup pnpm start -p 3100 > "$RUNNER_TEMP/web.log" 2>&1 &
+      - name: Wait for the stack
+        run: |
+          for url in http://localhost:8000/ready http://localhost:3100/login; do
+            timeout 60 bash -c "until curl -fsS -o /dev/null $url; do sleep 1; done"
+          done
+      - run: pnpm e2e
+        working-directory: apps/web
+      - name: Keep logs and the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: |
+            ${{ runner.temp }}/*.log
+            apps/web/playwright-report/
+            apps/web/test-results/
+          retention-days: 7
+
   docker:
     runs-on: ubuntu-latest
     needs: [python]
