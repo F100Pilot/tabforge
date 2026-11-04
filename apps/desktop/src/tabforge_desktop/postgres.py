@@ -52,13 +52,22 @@ class EmbeddedPostgres:
     port: int | None = field(default=None, init=False)
 
     def _run(self, name: str, *args: str) -> None:
-        subprocess.run(  # noqa: S603 - fixed executable from the bundle, no shell
-            [str(executable(self.bin_dir, name)), *args],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=START_TIMEOUT_S * 2,
-        )
+        """Runs a bundled PostgreSQL tool, its output appended to <logs>/pg_ctl.log.
+
+        Never a pipe: on Windows `pg_ctl start` leaves the server holding inherited handles,
+        so reading a pipe to EOF would wait for as long as Postgres runs (even past a timeout).
+        """
+        tool_log = self.log_file.parent / "pg_ctl.log"
+        tool_log.parent.mkdir(parents=True, exist_ok=True)
+        with tool_log.open("ab") as out:
+            subprocess.run(  # noqa: S603 - fixed executable from the bundle, no shell
+                [str(executable(self.bin_dir, name)), *args],
+                check=True,
+                stdin=subprocess.DEVNULL,
+                stdout=out,
+                stderr=subprocess.STDOUT,
+                timeout=START_TIMEOUT_S * 2,
+            )
 
     @property
     def password(self) -> str:

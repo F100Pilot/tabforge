@@ -51,3 +51,5 @@ def test_cluster_lifecycle(tmp_path: Path) -> None:
 
     pg.start()  # restart with existing data and a new port
     pg.stop()
+    # Tool output goes to a file, never a pipe (Windows: the server inherits the handles).
+    assert (tmp_path / "logs" / "pg_ctl.log").stat().st_size > 0

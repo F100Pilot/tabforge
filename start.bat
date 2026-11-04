@@ -35,5 +35,6 @@ exit /b 0
 :fail
 echo.
 echo O TabForge nao arrancou. Registos: %LOCALAPPDATA%\TabForge\logs
-pause
+rem No pause in CI (GitHub Actions sets CI=true): it would wait for a key forever.
+if not defined CI pause
 exit /b 1
