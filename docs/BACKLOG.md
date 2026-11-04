@@ -41,6 +41,11 @@
 - [x] Export Guitar Pro (.gp) e MIDI no browser com o alphaTab, PDF por impressão na paleta clara (US-05, ADR-0007)
 - [ ] Partilha pública (US-06) — bloqueado por ADR-0003
 
+- [ ] Comparar e afinar (depois do PR #9): importar a tab certa (.gp 3–7 via alphaTab) de uma música já transcrita, alinhar com a versão da IA (introduções, repetições, tempo), mostrar métricas (notas encontradas, posições corretas)
+- [ ] Afinar os pesos de corda/traste (Viterbi) por utilizador com as tabs certas importadas e com os pares revisão IA → revisão corrigida no editor; aplicar às tabs novas e medir antes/depois
+- [ ] Afinar a quantização (tercinas, pausas, tempo) com pares áudio + tab certa alinhados
+- [ ] (Reavaliar com dados suficientes) fine-tuning da deteção de notas — o treino do Basic Pitch usa TensorFlow (excluído, ADR-0002) e o modelo ONNX não é treinável diretamente
+
 ## Desktop (ADR-0008)
 - [x] Fase 1 — modo `env=desktop` na API e no worker: `LocalObjectStore` e `PUT /v1/local-storage/{key}` assinado (HMAC, ≤ 300 s, tipo e tamanho verificados), `POST /v1/auth/desktop` com token de arranque (sessão e CSRF do ADR-0006), link mágico desativado (404), `Host` só loopback, worker com fonte local, retenção a apagar ficheiros locais, ffmpeg/ffprobe configuráveis e `run_forever` para correr o loop numa thread
 - [ ] Programa de arranque `apps/desktop` (`pyproject.toml`/`uv.lock` próprios, `torch` CPU, overrides do ADR-0002, `pip-audit --strict`): gera os segredos por arranque, arranca API e worker no mesmo processo; a web troca o token em `POST /v1/auth/desktop`
