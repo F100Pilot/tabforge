@@ -55,7 +55,7 @@ jobs:
           POSTGRES_DB: tabforge_test
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U tabforge" --health-interval 5s --health-retries 10
+          --health-cmd "pg_isready -U tabforge -d tabforge_test" --health-interval 5s --health-retries 10
       s3:
         image: versity/versitygw:v1.9.0
         env:
