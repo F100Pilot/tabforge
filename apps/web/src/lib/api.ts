@@ -3,7 +3,7 @@ import { declaredType, type FileLike } from "./file-checks";
 
 export type SourceKind = "mix" | "guitar_stem";
 export type JobStatus = "queued" | "running" | "done" | "failed";
-export type JobStage = "separating" | "transcribing" | "arranging";
+export type JobStage = "normalizing" | "separating" | "transcribing" | "arranging";
 
 export interface UploadTicket {
   audio_id: string;
@@ -22,6 +22,33 @@ export interface Job {
   tab_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface JobSummary extends Job {
+  source_kind: SourceKind;
+  duration_ms: number | null;
+  tab_title: string | null;
+}
+
+export interface TabSummary {
+  id: string;
+  title: string;
+  tuning: unknown;
+  visibility: string;
+  created_at: string;
+}
+
+export interface ScoreWarning {
+  bar: number;
+  code: string;
+  pitch: number;
+}
+
+/** The subset of Score v1/v2 the UI reads. */
+export interface ScoreInfo {
+  tempo_bpm: number | null;
+  time_signature: [number, number] | null;
+  warnings: ScoreWarning[];
 }
 
 export interface Tab {
@@ -60,7 +87,7 @@ const isRec = (v: unknown): v is Rec => typeof v === "object" && v !== null && !
 const isStr = (v: unknown): v is string => typeof v === "string";
 const isNullableStr = (v: unknown): v is string | null => v === null || isStr(v);
 const JOB_STATUSES: readonly string[] = ["queued", "running", "done", "failed"];
-const JOB_STAGES: readonly string[] = ["separating", "transcribing", "arranging"];
+const JOB_STAGES: readonly string[] = ["normalizing", "separating", "transcribing", "arranging"];
 
 export function parseUploadTicket(v: unknown): UploadTicket {
   if (
@@ -111,6 +138,68 @@ export function parseTab(v: unknown): Tab {
     throw new ResponseShapeError("tab");
   }
   return v as unknown as Tab;
+}
+
+export function parseJobSummary(v: unknown): JobSummary {
+  const job = parseJob(v);
+  const r = v as Rec;
+  if (
+    (r.source_kind !== "mix" && r.source_kind !== "guitar_stem") ||
+    !(r.duration_ms === null || typeof r.duration_ms === "number") ||
+    !isNullableStr(r.tab_title)
+  ) {
+    throw new ResponseShapeError("job summary");
+  }
+  return { ...job, source_kind: r.source_kind, duration_ms: r.duration_ms, tab_title: r.tab_title };
+}
+
+export function parseJobList(v: unknown): JobSummary[] {
+  if (!isRec(v) || !Array.isArray(v.items)) throw new ResponseShapeError("job list");
+  return v.items.map(parseJobSummary);
+}
+
+export function parseTabSummary(v: unknown): TabSummary {
+  if (
+    !isRec(v) ||
+    !isStr(v.id) ||
+    !isStr(v.title) ||
+    !isStr(v.visibility) ||
+    !isStr(v.created_at)
+  ) {
+    throw new ResponseShapeError("tab summary");
+  }
+  return v as unknown as TabSummary;
+}
+
+export function parseTabList(v: unknown): TabSummary[] {
+  if (!isRec(v) || !Array.isArray(v.items)) throw new ResponseShapeError("tab list");
+  return v.items.map(parseTabSummary);
+}
+
+/** Tolerant reader for the score fields the viewer shows; unknown/missing fields degrade to null/[]. */
+export function readScoreInfo(score: unknown): ScoreInfo {
+  const r = isRec(score) ? score : {};
+  const ts = r.time_signature;
+  const timeSig =
+    Array.isArray(ts) &&
+    ts.length === 2 &&
+    typeof ts[0] === "number" &&
+    typeof ts[1] === "number" &&
+    ts[0] > 0 &&
+    ts[1] > 0
+      ? ([ts[0], ts[1]] as [number, number])
+      : null;
+  const warnings = Array.isArray(r.warnings)
+    ? r.warnings.filter(
+        (w): w is ScoreWarning =>
+          isRec(w) && typeof w.bar === "number" && isStr(w.code) && typeof w.pitch === "number",
+      )
+    : [];
+  return {
+    tempo_bpm: typeof r.tempo_bpm === "number" && r.tempo_bpm > 0 ? r.tempo_bpm : null,
+    time_signature: timeSig,
+    warnings,
+  };
 }
 
 export function parseProblem(status: number, body: unknown): ProblemError {
@@ -196,4 +285,12 @@ export async function getJob(id: string, signal?: AbortSignal) {
 
 export async function getTab(id: string, signal?: AbortSignal) {
   return parseTab(await request(`/v1/tabs/${encodeURIComponent(id)}`, { signal }));
+}
+
+export async function listJobs(limit: number, signal?: AbortSignal) {
+  return parseJobList(await request(`/v1/jobs?limit=${encodeURIComponent(String(limit))}`, { signal }));
+}
+
+export async function listTabs(limit: number, signal?: AbortSignal) {
+  return parseTabList(await request(`/v1/tabs?limit=${encodeURIComponent(String(limit))}`, { signal }));
 }
