@@ -29,7 +29,10 @@
 - [x] Domínio: quantização rítmica (TDD), a partir de onsets e beats, sem depender de offsets do Basic Pitch (M0: F1 com offset de 0,55)
 - [x] Domínio: atribuição corda/traste Viterbi (TDD) — 65,7% exato em guitaristas de teste do GuitarSet (`docs/eval/M2-arranging.md`)
 - [x] Integração Demucs/Basic Pitch/librosa no worker (US-02), com etapa `normalizing` (ffmpeg, limite de 10 min)
-- [ ] Auth email + Google, eliminação de conta (US-07)
+- [x] Auth por email (link mágico) e eliminação de conta (US-07, ADR-0006): sessão opaca em Postgres, cookie `HttpOnly`/`Secure`/`SameSite=Lax`, token CSRF, SMTP genérico (Mailpit em dev); `DELETE /v1/me` apaga áudio no storage e depois o utilizador em cascata; o worker apaga tokens e sessões expirados
+- [ ] Login com Google (OAuth) (US-07) — adiado; reutiliza a mesma sessão (ADR-0006)
+- [ ] Eliminação de conta: um upload pré-assinado emitido antes do `DELETE /v1/me` pode ainda chegar ao storage (≤ 5 min) sem linha na BD. Fechar com regra de lifecycle do bucket para `audio/` órfãos ou limpeza por prefixo `audio/{user_id}/`
+- [ ] Rate limiting partilhado entre réplicas (Postgres/Redis) e IP real atrás de proxy (`--forwarded-allow-ips`) — hoje em memória por instância
 - [ ] Editor de tab com revisões (US-04)
 - [x] Quotas, rate limiting, retenção de áudio — 20 uploads/24 h, 30 escritas/min por utilizador (em memória, uma instância), worker apaga áudio expirado (30 dias) e uploads abandonados (>1 dia)
 - [ ] E2E Playwright: upload → tab → editar
