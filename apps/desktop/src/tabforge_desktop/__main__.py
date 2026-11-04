@@ -43,15 +43,13 @@ def main(argv: list[str] | None = None) -> int:
             from tabforge_desktop.smoke import run
 
             run(desktop.launch_token)
-            log.info('{"event": "smoke_ok"}')
-            print("smoke ok")
+            log.info('{"event": "smoke_ok"}')  # CI looks for this line
         else:
             _show_window(desktop.login_url())
         return 0
     except Exception:
+        # Windowed build: no console, and an uncaught exception would open a blocking dialog.
         log.exception('{"event": "desktop_failed"}')
-        if args.smoke:
-            raise
         return 1
     finally:
         desktop.stop()
