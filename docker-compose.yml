@@ -1,4 +1,4 @@
-# Local development only. Credentials below are dev defaults read from .env.
+# Local development only. Credentials are dev defaults read from .env (see .env.example).
 services:
   postgres:
     image: postgres:17-alpine
@@ -13,28 +13,39 @@ services:
       interval: 5s
       retries: 10
 
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
+  # S3-compatible object storage for dev (ADR-0004; MinIO no longer ships images on Docker Hub).
+  s3:
+    image: versity/versitygw:v1.9.0
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-tabforge}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
-    ports: ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
-    volumes: [miniodata:/data]
+      ROOT_ACCESS_KEY: ${S3_ACCESS_KEY:-tabforge}
+      ROOT_SECRET_KEY: ${S3_SECRET_KEY:?set S3_SECRET_KEY in .env}
+      VGW_BACKEND: posix
+      VGW_BACKEND_ARG: /data
+    ports: ["127.0.0.1:7070:7070"]
+    volumes: [s3data:/data]
+
+  # One-shot: apply migrations and create the bucket (with CORS for the web origin).
+  migrate:
+    build: ./services/api
+    env_file: .env
+    command: ["sh", "-c", "uv run --no-sync alembic upgrade head && uv run --no-sync python -m tabforge_api.cli init-storage"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      s3: { condition: service_started }
 
   api:
     build: ./services/api
     env_file: .env
     ports: ["127.0.0.1:8000:8000"]
     depends_on:
-      postgres: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
 
   worker:
     build: ./services/worker
     env_file: .env
     depends_on:
-      postgres: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
 
 volumes:
   pgdata:
-  miniodata:
+  s3data:
