@@ -14,8 +14,6 @@ import urllib.request
 import wave
 from typing import Any
 
-from tabforge_desktop.config import API_URL, WEB_URL
-
 JOB_TIMEOUT_S = 900
 
 
@@ -42,7 +40,10 @@ def guitar_like_wav(seconds: float = 6.0, rate: int = 22050) -> bytes:
 
 
 class Client:
-    def __init__(self) -> None:
+    """Talks to the web origin only, exactly like the window: /v1 goes through proxy.ts."""
+
+    def __init__(self, base: str) -> None:
+        self.base = base
         self.opener = urllib.request.build_opener(
             urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
         )
@@ -57,10 +58,10 @@ class Client:
         headers: dict[str, str] | None = None,
     ) -> Any:
         data = raw if raw is not None else (json.dumps(body).encode() if body is not None else None)
-        h = {"Origin": WEB_URL, **(headers or {})}
+        h = {"Origin": self.base, **(headers or {})}
         if body is not None:
             h["Content-Type"] = "application/json"
-        if self.csrf and method != "GET" and url.startswith(API_URL + "/v1/") and raw is None:
+        if self.csrf and method != "GET" and url.startswith(self.base + "/v1/") and raw is None:
             h["X-CSRF-Token"] = self.csrf
         request = urllib.request.Request(url, data=data, method=method, headers=h)  # noqa: S310
         with self.opener.open(request, timeout=30) as response:
@@ -68,30 +69,31 @@ class Client:
             return json.loads(text) if "json" in response.headers.get("Content-Type", "") else None
 
 
-def run(launch_token: str) -> None:
-    client = Client()
-    session = client.call("POST", f"{API_URL}/v1/auth/desktop", {"token": launch_token})
+def run(launch_token: str, base: str) -> None:
+    client = Client(base)
+    api = f"{base}/v1"
+    session = client.call("POST", f"{api}/auth/desktop", {"token": launch_token})
     client.csrf = session["csrf_token"]
 
     audio = guitar_like_wav()
     upload = client.call(
         "POST",
-        f"{API_URL}/v1/uploads",
+        f"{api}/uploads",
         {"content_type": "audio/wav", "size_bytes": len(audio), "source_kind": "guitar_stem"},
     )
     client.call("PUT", upload["upload_url"], raw=audio, headers=upload["headers"])
-    job = client.call("POST", f"{API_URL}/v1/uploads/{upload['audio_id']}/complete", {})
+    job = client.call("POST", f"{api}/uploads/{upload['audio_id']}/complete", {})
 
     deadline = time.monotonic() + JOB_TIMEOUT_S
     while job["status"] not in ("done", "failed"):
         if time.monotonic() > deadline:
             raise TimeoutError(f"job still {job['status']}/{job['stage']}")
         time.sleep(2)
-        job = client.call("GET", f"{API_URL}/v1/jobs/{job['id']}")
+        job = client.call("GET", f"{api}/jobs/{job['id']}")
     if job["status"] != "done":
         raise RuntimeError(f"job failed: {job['error_code']}")
 
-    tab = client.call("GET", f"{API_URL}/v1/tabs/{job['tab_id']}")
+    tab = client.call("GET", f"{api}/tabs/{job['tab_id']}")
     if not tab.get("alphatex", "").strip():
         raise RuntimeError("tab without alphaTex")
-    client.call("GET", f"{WEB_URL}/login")
+    client.call("GET", f"{base}/login")

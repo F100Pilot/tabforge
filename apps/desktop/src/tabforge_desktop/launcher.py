@@ -7,6 +7,7 @@ Shutdown runs in reverse and always reaches Postgres, so the cluster is never le
 import logging
 import os
 import secrets
+import socket
 import subprocess
 import threading
 import time
@@ -15,9 +16,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from tabforge_desktop.config import API_PORT, API_URL, WEB_URL, BundleLayout, service_env, web_env
+from tabforge_desktop.config import BundleLayout, Ports, service_env, web_env
 from tabforge_desktop.paths import DataLayout
-from tabforge_desktop.postgres import EmbeddedPostgres
+from tabforge_desktop.postgres import EmbeddedPostgres, free_port
 
 log = logging.getLogger("tabforge_desktop")
 READY_TIMEOUT_S = 90
@@ -62,12 +63,38 @@ def run_migrations(bundle: BundleLayout, database_url: str) -> None:
     command.upgrade(cfg, "head")
 
 
+PREFERRED_PORTS = Ports(web=47800, api=47801)
+
+
+def port_is_free(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+
+def pick_ports(preferred: Ports = PREFERRED_PORTS) -> Ports:
+    """The preferred ports when both are free (stable origin: the browser keeps settings such
+    as the score theme per origin); otherwise two distinct free ports. A small race is
+    acceptable on a single-user PC."""
+    if port_is_free(preferred.web) and port_is_free(preferred.api):
+        return preferred
+    web = free_port()
+    api = free_port()
+    while api == web:
+        api = free_port()
+    return Ports(web=web, api=api)
+
+
 @dataclass
 class Desktop:
     data: DataLayout
     bundle: BundleLayout
     pipeline: str = "real"
     launch_token: str = field(default_factory=lambda: secrets.token_urlsafe(32))
+    ports: Ports = field(default_factory=lambda: pick_ports())
     _stops: list[Callable[[], None]] = field(default_factory=list)
     _web: subprocess.Popen[bytes] | None = None
 
@@ -89,6 +116,7 @@ class Desktop:
             pg.url(),
             launch_token=self.launch_token,
             upload_secret=secrets.token_urlsafe(32),
+            ports=self.ports,
             pipeline=self.pipeline,
         )
         os.environ.update(env)  # Settings and WorkerConfig read the process environment
@@ -96,20 +124,21 @@ class Desktop:
         self._start_api()
         self._start_worker()
         self._start_web()
-        wait_for(f"{API_URL}/ready")
-        wait_for(f"{WEB_URL}/login", failed=self._web_failed)
+        wait_for(f"{self.ports.api_url}/ready")
+        wait_for(f"{self.ports.web_url}/login", failed=self._web_failed)
+        log.info('{"event": "desktop_ports", "web": %d, "api": %d}', self.ports.web, self.ports.api)
         log.info('{"event": "desktop_ready"}')
 
     def login_url(self) -> str:
         """Opened once by the window; the web exchanges the token for a session."""
-        return f"{WEB_URL}/desktop#token={self.launch_token}"
+        return f"{self.ports.web_url}/desktop#token={self.launch_token}"
 
     def _start_api(self) -> None:
         import uvicorn
         from tabforge_api.main import create_app
 
         server = uvicorn.Server(
-            uvicorn.Config(create_app(), host="127.0.0.1", port=API_PORT, log_config=None)
+            uvicorn.Config(create_app(), host="127.0.0.1", port=self.ports.api, log_config=None)
         )
         thread = threading.Thread(target=server.run, name="api", daemon=True)
         thread.start()
@@ -140,7 +169,7 @@ class Desktop:
         process = subprocess.Popen(  # noqa: S603 - bundled node and server.js, no shell
             [str(self.bundle.node), str(self.bundle.web_server)],
             cwd=self.bundle.web_server.parent,
-            env={**os.environ, **web_env()},
+            env={**os.environ, **web_env(self.ports)},
             stdout=log_file,
             stderr=subprocess.STDOUT,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),

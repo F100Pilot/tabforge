@@ -42,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.smoke:
             from tabforge_desktop.smoke import run
 
-            run(desktop.launch_token)
+            run(desktop.launch_token, desktop.ports.web_url)
             log.info('{"event": "smoke_ok"}')  # CI looks for this line
         else:
             _show_window(desktop.login_url())

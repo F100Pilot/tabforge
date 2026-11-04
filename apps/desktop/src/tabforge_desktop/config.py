@@ -6,10 +6,29 @@ from pathlib import Path
 
 from tabforge_desktop.paths import DataLayout, executable
 
-WEB_PORT = 47800
-API_PORT = 47801
-WEB_URL = f"http://127.0.0.1:{WEB_PORT}"
-API_URL = f"http://127.0.0.1:{API_PORT}"
+
+@dataclass(frozen=True, slots=True)
+class Ports:
+    """Loopback ports chosen at each start, so another program on a fixed port cannot block us.
+
+    Only the web origin is used by the window: the web server forwards /v1 to the API
+    (apps/web/src/proxy.ts), so uploads and the session cookie stay on one origin.
+    """
+
+    web: int
+    api: int
+
+    def __post_init__(self) -> None:
+        if self.web == self.api:
+            raise ValueError("web and API need different ports")
+
+    @property
+    def web_url(self) -> str:
+        return f"http://127.0.0.1:{self.web}"
+
+    @property
+    def api_url(self) -> str:
+        return f"http://127.0.0.1:{self.api}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,19 +68,21 @@ def service_env(
     database_url: str,
     launch_token: str,
     upload_secret: str,
+    ports: Ports,
     pipeline: str = "real",
 ) -> dict[str, str]:
     """Variables read by tabforge_api.Settings and tabforge_worker (prefix TABFORGE_)."""
     return {
         "TABFORGE_ENV": "desktop",
         "TABFORGE_DATABASE_URL": database_url,
-        "TABFORGE_CORS_ORIGINS": json.dumps([WEB_URL]),
+        "TABFORGE_CORS_ORIGINS": json.dumps([ports.web_url]),
         "TABFORGE_STORAGE_BACKEND": "local",
         "TABFORGE_LOCAL_STORAGE_DIR": str(data.audio),
         "TABFORGE_DESKTOP_LAUNCH_TOKEN": launch_token,
         "TABFORGE_LOCAL_UPLOAD_SECRET": upload_secret,
-        "TABFORGE_API_PUBLIC_URL": API_URL,
-        "TABFORGE_WEB_BASE_URL": WEB_URL,
+        # Signed upload URLs point at the web origin; the web proxies them to the API.
+        "TABFORGE_API_PUBLIC_URL": ports.web_url,
+        "TABFORGE_WEB_BASE_URL": ports.web_url,
         # Plain HTTP on 127.0.0.1: a Secure cookie would never be sent back.
         "TABFORGE_SESSION_COOKIE_SECURE": "false",
         "TABFORGE_WORKER_PIPELINE": pipeline,
@@ -74,6 +95,11 @@ def service_env(
     }
 
 
-def web_env() -> dict[str, str]:
-    """For the Next.js standalone server. NEXT_PUBLIC_* values are baked at build time."""
-    return {"PORT": str(WEB_PORT), "HOSTNAME": "127.0.0.1", "NEXT_TELEMETRY_DISABLED": "1"}
+def web_env(ports: Ports) -> dict[str, str]:
+    """For the Next.js standalone server; it reads the API address at run time (proxy.ts)."""
+    return {
+        "PORT": str(ports.web),
+        "HOSTNAME": "127.0.0.1",
+        "TABFORGE_API_INTERNAL_URL": ports.api_url,
+        "NEXT_TELEMETRY_DISABLED": "1",
+    }
