@@ -6,6 +6,11 @@ import {
   parseProblem,
   csrfHeaders,
   getSession,
+  getComparison,
+  getReference,
+  putReference,
+  deleteReference,
+  parseComparison,
   isUnauthenticated,
   parseEmptyObject,
   parseSession,
@@ -175,5 +180,84 @@ describe("session requests", () => {
     const sent = f.mock.calls[1][1].headers as Headers;
     expect(sent.get("X-CSRF-Token")).toBe("tok1");
     expect((f.mock.calls[0][1].headers as Headers).has("X-CSRF-Token")).toBe(false);
+  });
+});
+
+const comparison = {
+  revision_id: "r1",
+  shift_quarters: 4,
+  scale: 1,
+  matched: 8,
+  ai_notes: 10,
+  reference_notes: 12,
+  recall: 0.667,
+  precision: 0.8,
+  f1: 0.727,
+  position_accuracy: null,
+  onset_error: 0.1,
+  bars: [{ bar: 1, reference_notes: 4, matched: 3, positions_ok: 2 }],
+};
+
+describe("parseComparison", () => {
+  it("accepts a valid comparison, including null position accuracy", () => {
+    expect(parseComparison(comparison).bars[0].matched).toBe(3);
+  });
+  it("rejects missing fields and bad bars", () => {
+    expect(() => parseComparison({ ...comparison, recall: "x" })).toThrow(ResponseShapeError);
+    expect(() => parseComparison({ ...comparison, bars: [{ bar: 1 }] })).toThrow(ResponseShapeError);
+    expect(() => parseComparison(null)).toThrow(ResponseShapeError);
+  });
+});
+
+describe("reference requests", () => {
+  beforeEach(() => vi.stubEnv("NEXT_PUBLIC_API_URL", "http://localhost:8000"));
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    setCsrfToken(null);
+  });
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  const missing = () => json(404, { code: "reference_not_found", detail: "Sem tab certa." });
+
+  it("getReference and getComparison return null on 404 reference_not_found", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => missing()));
+    expect(await getReference("t1")).toBeNull();
+    expect(await getComparison("t1")).toBeNull();
+  });
+
+  it("rethrows other 404s", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json(404, { code: "not_found", detail: "x" })));
+    await expect(getComparison("t1")).rejects.toBeInstanceOf(ProblemError);
+  });
+
+  it("putReference sends the notes with the csrf token and parses the summary", async () => {
+    setCsrfToken("tok");
+    const f = vi
+      .fn()
+      .mockResolvedValue(json(200, { filename: "a.gp", track: "Guitarra", notes: 1, created_at: "2026-11-04T10:00:00Z" }));
+    vi.stubGlobal("fetch", f);
+    const out = await putReference("t 1", {
+      filename: "a.gp",
+      track: "Guitarra",
+      notes: [{ onset: 0, pitch: 40, string: 6, fret: 0, bar: 1 }],
+    });
+    expect(out.notes).toBe(1);
+    expect(String(f.mock.calls[0][0])).toBe("http://localhost:8000/v1/tabs/t%201/reference");
+    expect(f.mock.calls[0][1].method).toBe("PUT");
+    expect((f.mock.calls[0][1].headers as Headers).get("X-CSRF-Token")).toBe("tok");
+    expect(JSON.parse(f.mock.calls[0][1].body).notes).toHaveLength(1);
+  });
+
+  it("surfaces 413 and 422 as ProblemError", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json(413, { code: "payload_too_large", detail: "grande" })));
+    await expect(putReference("t1", { filename: "a", track: "b", notes: [] })).rejects.toMatchObject({ status: 413 });
+  });
+
+  it("deleteReference accepts an empty 204", async () => {
+    const f = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", f);
+    await expect(deleteReference("t1")).resolves.toBeUndefined();
+    expect(f.mock.calls[0][1].method).toBe("DELETE");
   });
 });

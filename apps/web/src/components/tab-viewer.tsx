@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AlphaTabApi } from "@coderline/alphatab";
 import { getTab, isUnauthenticated, readScoreInfo, type ScoreInfo, type Tab } from "@/lib/api";
 import { SignInPrompt } from "./sign-in-prompt";
+import { TabCompare } from "./tab-compare";
 import { formatClock, formatTuning } from "@/lib/format";
 import { exportScore, saveFile, type ExportFormat } from "@/lib/export";
 import { loadScoreTheme, SCORE_COLORS, saveScoreTheme, type ScoreTheme } from "@/lib/score-theme";
@@ -72,6 +73,7 @@ export function TabViewer({ tabId }: { tabId: string }) {
   return (
     <>
       <TabHeader tab={tab} info={info} theme={theme} onTheme={changeTheme} onPrint={print} />
+      <TabCompare tabId={tab.id} revisionKey={tab.revision.id} />
       <TabPlayer alphatex={tab.alphatex} theme={printing ? "light" : theme} onRenderFinished={onRenderFinished} />
     </>
   );

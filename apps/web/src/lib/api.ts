@@ -472,3 +472,133 @@ export async function deleteAccount(): Promise<void> {
   await request("/v1/me", { method: "DELETE" });
   setCsrfToken(null);
 }
+
+// --- ADR-0009: comparison with the right tab ---
+
+export interface ReferenceNoteInput {
+  onset: number;
+  pitch: number;
+  string: number;
+  fret: number;
+  bar: number;
+}
+
+export interface ReferenceSummary {
+  filename: string;
+  track: string;
+  notes: number;
+  created_at: string;
+}
+
+export interface BarComparison {
+  bar: number;
+  reference_notes: number;
+  matched: number;
+  positions_ok: number;
+}
+
+export interface Comparison {
+  revision_id: string;
+  shift_quarters: number;
+  scale: number;
+  matched: number;
+  ai_notes: number;
+  reference_notes: number;
+  recall: number;
+  precision: number;
+  f1: number;
+  position_accuracy: number | null;
+  onset_error: number | null;
+  bars: BarComparison[];
+}
+
+const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const isNullableNum = (v: unknown): v is number | null => v === null || isNum(v);
+
+export function parseReferenceSummary(v: unknown): ReferenceSummary {
+  if (!isRec(v) || !isStr(v.filename) || !isStr(v.track) || !isNum(v.notes) || !isStr(v.created_at)) {
+    throw new ResponseShapeError("reference");
+  }
+  return { filename: v.filename, track: v.track, notes: v.notes, created_at: v.created_at };
+}
+
+export function parseComparison(v: unknown): Comparison {
+  if (
+    !isRec(v) ||
+    !isStr(v.revision_id) ||
+    !isNum(v.shift_quarters) ||
+    !isNum(v.scale) ||
+    !isNum(v.matched) ||
+    !isNum(v.ai_notes) ||
+    !isNum(v.reference_notes) ||
+    !isNum(v.recall) ||
+    !isNum(v.precision) ||
+    !isNum(v.f1) ||
+    !isNullableNum(v.position_accuracy) ||
+    !isNullableNum(v.onset_error) ||
+    !Array.isArray(v.bars)
+  ) {
+    throw new ResponseShapeError("comparison");
+  }
+  const bars = v.bars.map((b): BarComparison => {
+    if (!isRec(b) || !isNum(b.bar) || !isNum(b.reference_notes) || !isNum(b.matched) || !isNum(b.positions_ok)) {
+      throw new ResponseShapeError("comparison bar");
+    }
+    return { bar: b.bar, reference_notes: b.reference_notes, matched: b.matched, positions_ok: b.positions_ok };
+  });
+  return {
+    revision_id: v.revision_id,
+    shift_quarters: v.shift_quarters,
+    scale: v.scale,
+    matched: v.matched,
+    ai_notes: v.ai_notes,
+    reference_notes: v.reference_notes,
+    recall: v.recall,
+    precision: v.precision,
+    f1: v.f1,
+    position_accuracy: v.position_accuracy,
+    onset_error: v.onset_error,
+    bars,
+  };
+}
+
+/** Stores the right tab's notes (replaces any previous one). 413 too big, 422 invalid. */
+export async function putReference(
+  tabId: string,
+  body: { filename: string; track: string; notes: ReferenceNoteInput[] },
+) {
+  return parseReferenceSummary(
+    await request(`/v1/tabs/${encodeURIComponent(tabId)}/reference`, {
+      method: "PUT",
+      headers: JSON_HEADERS,
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+async function nullOnMissingReference<T>(run: () => Promise<T>): Promise<T | null> {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof ProblemError && err.status === 404 && err.code === "reference_not_found") return null;
+    throw err;
+  }
+}
+
+/** The stored reference, or null when the tab has none (404 `reference_not_found`). */
+export function getReference(tabId: string, signal?: AbortSignal): Promise<ReferenceSummary | null> {
+  return nullOnMissingReference(async () =>
+    parseReferenceSummary(await request(`/v1/tabs/${encodeURIComponent(tabId)}/reference`, { signal })),
+  );
+}
+
+export async function deleteReference(tabId: string): Promise<void> {
+  await request(`/v1/tabs/${encodeURIComponent(tabId)}/reference`, { method: "DELETE" });
+}
+
+/** Comparison of the current revision with the reference, or null when there is no reference. */
+export function getComparison(tabId: string, signal?: AbortSignal): Promise<Comparison | null> {
+  return nullOnMissingReference(async () =>
+    parseComparison(await request(`/v1/tabs/${encodeURIComponent(tabId)}/comparison`, { signal })),
+  );
+}

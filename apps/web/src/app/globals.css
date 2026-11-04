@@ -1047,3 +1047,125 @@ kbd {
     padding: 0 !important;
   }
 }
+
+/* Comparison with the right tab (ADR-0009) */
+.compare {
+  margin: 1.25rem 0;
+  padding: 1rem 1.25rem;
+}
+.compare h2 {
+  margin: 0;
+  font-size: 1.125rem;
+}
+.compare-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.compare-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.compare-status {
+  margin: 0.5rem 0 0;
+  font-size: 0.875rem;
+  min-height: 1.2em;
+}
+.compare-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+.compare-pick select {
+  min-height: 44px;
+  max-width: 100%;
+  padding: 0 0.75rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+.compare-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+}
+.metric {
+  padding: 0.75rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--bg);
+  min-width: 0;
+}
+.metric dt {
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+.metric dd {
+  display: flex;
+  flex-direction: column;
+  margin: 0.25rem 0 0;
+}
+.metric-value {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+.metric-hint {
+  font-size: 0.75rem;
+}
+.compare-align {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  list-style: none;
+}
+.compare-sub {
+  margin: 0.5rem 0 0.25rem;
+  font-size: 0.9375rem;
+}
+.compare-legend,
+.compare-limit {
+  margin: 0.25rem 0 0.5rem;
+  font-size: 0.8125rem;
+}
+.bar-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(1.75rem, 1fr));
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bar-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.75rem;
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: #0f1115;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+}
+.bar-cell:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 1px;
+}
+@media print {
+  .compare {
+    display: none !important;
+  }
+}
+
+.bar-empty {
+  color: var(--muted);
+}
