@@ -13,5 +13,5 @@ COPY src ./src
 RUN uv sync --frozen --no-dev
 RUN useradd --system --uid 10001 worker
 USER worker
-# Entry point implemented in M1 (queue loop).
-CMD ["uv", "run", "--no-sync", "python", "-c", "import tabforge_worker; print('worker skeleton')"]
+# M1: queue loop with stub stages. ML extras (--extra ml) enter the image with the real stages (M2).
+CMD ["uv", "run", "--no-sync", "python", "-m", "tabforge_worker"]
