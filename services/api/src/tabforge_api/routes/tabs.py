@@ -2,9 +2,9 @@
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from tabforge_score import Score, to_alphatex
@@ -31,6 +31,41 @@ class TabOut(BaseModel):
     created_at: datetime
     revision: RevisionOut
     alphatex: str
+
+
+class TabSummary(BaseModel):
+    id: uuid.UUID
+    title: str
+    tuning: str
+    visibility: str
+    created_at: datetime
+
+
+class TabList(BaseModel):
+    items: list[TabSummary]
+
+
+@router.get("")
+def list_tabs(
+    user: CurrentUser,
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> TabList:
+    tabs = session.execute(
+        select(Tab).where(Tab.owner_id == user.id).order_by(Tab.created_at.desc()).limit(limit)
+    ).scalars()
+    return TabList(
+        items=[
+            TabSummary(
+                id=t.id,
+                title=t.title,
+                tuning=t.tuning,
+                visibility=t.visibility,
+                created_at=t.created_at,
+            )
+            for t in tabs
+        ]
+    )
 
 
 @router.get("/{tab_id}")
