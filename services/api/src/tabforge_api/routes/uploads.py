@@ -4,17 +4,17 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from tabforge_api.audio_types import SNIFF_BYTES, normalize_declared_type, sniff_audio_type
-from tabforge_api.deps import CurrentUser, SessionDep, SettingsDep, StoreDep
+from tabforge_api.deps import CurrentUser, SessionDep, SettingsDep, StoreDep, limit_writes
 from tabforge_api.models import AudioAsset, Job
 from tabforge_api.problems import ProblemError
 from tabforge_api.routes.jobs import JobOut
 
-router = APIRouter(prefix="/v1/uploads", tags=["uploads"])
+router = APIRouter(prefix="/v1/uploads", tags=["uploads"], dependencies=[Depends(limit_writes)])
 
 
 class UploadCreate(BaseModel):
@@ -45,6 +45,22 @@ def create_upload(
     if body.size_bytes > settings.upload_max_bytes:
         raise ProblemError(
             413, "file_too_large", f"maximum size is {settings.upload_max_bytes} bytes"
+        )
+    recent = session.execute(
+        select(func.count())
+        .select_from(AudioAsset)
+        .where(
+            AudioAsset.user_id == user.id,
+            AudioAsset.status != "rejected",
+            AudioAsset.created_at > datetime.now(UTC) - timedelta(days=1),
+        )
+    ).scalar_one()
+    if recent >= settings.daily_upload_limit:
+        raise ProblemError(
+            429,
+            "quota_exceeded",
+            f"daily limit of {settings.daily_upload_limit} uploads reached",
+            headers={"Retry-After": "3600"},
         )
 
     audio_id = uuid.uuid4()

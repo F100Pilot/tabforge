@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from tabforge_api.db import make_engine, make_session_factory
+from tabforge_api.limits import SlidingWindowLimiter
 from tabforge_api.problems import ProblemError, install_problem_handlers
 from tabforge_api.routes import jobs, tabs, uploads
 from tabforge_api.settings import Settings
@@ -17,6 +18,7 @@ def create_app(settings: Settings | None = None, store: ObjectStore | None = Non
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
     app.state.store = store or S3ObjectStore(settings)
+    app.state.write_limiter = SlidingWindowLimiter(settings.write_rate_per_minute, 60)
 
     if settings.cors_origins:
         app.add_middleware(

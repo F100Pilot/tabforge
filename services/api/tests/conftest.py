@@ -46,7 +46,7 @@ class FakeStore:
         self.objects[key] = (data, content_type)
 
 
-def _settings(url: str, **overrides: object) -> Settings:
+def _settings(url: str, **overrides: object) -> Settings:  # shared with other tests
     return Settings(database_url=url, dev_auth=True, **overrides)  # type: ignore[arg-type]
 
 

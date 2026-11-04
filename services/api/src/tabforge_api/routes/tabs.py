@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from tabforge_score import Score, to_alphatex
 
-from tabforge_api.deps import CurrentUser, SessionDep
+from tabforge_api.deps import CurrentUser, SessionDep, limit_writes
 from tabforge_api.models import Tab, TabRevision
 from tabforge_api.problems import ProblemError
 
@@ -145,7 +145,11 @@ class RevisionList(BaseModel):
     items: list[RevisionSummary]
 
 
-@router.post("/{tab_id}/revisions", status_code=201, dependencies=[Depends(_limit_body)])
+@router.post(
+    "/{tab_id}/revisions",
+    status_code=201,
+    dependencies=[Depends(_limit_body), Depends(limit_writes)],
+)
 def create_revision(
     tab_id: uuid.UUID, body: RevisionCreate, user: CurrentUser, session: SessionDep
 ) -> TabOut:

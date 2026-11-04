@@ -54,3 +54,15 @@ def get_current_user(session: SessionDep, settings: SettingsDep) -> User:
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def limit_writes(request: Request, user: CurrentUser) -> None:
+    """Per-user rate limit for state-changing routes (threat model T3)."""
+    retry_after = request.app.state.write_limiter.hit(str(user.id))
+    if retry_after is not None:
+        raise ProblemError(
+            429,
+            "rate_limited",
+            "too many requests; try again shortly",
+            headers={"Retry-After": str(retry_after)},
+        )

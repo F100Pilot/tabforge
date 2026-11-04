@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     presign_ttl_s: int = Field(default=MAX_PRESIGN_TTL_S, gt=0, le=MAX_PRESIGN_TTL_S)
     audio_retention_days: int = Field(default=30, gt=0)
 
+    # Abuse limits (threat model T3).
+    write_rate_per_minute: int = Field(default=30, gt=0)
+    daily_upload_limit: int = Field(default=20, gt=0)
+
     @model_validator(mode="after")
     def _dev_auth_only_in_dev(self) -> Self:
         if self.dev_auth and self.env != "dev":
