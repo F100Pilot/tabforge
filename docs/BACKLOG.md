@@ -40,3 +40,12 @@
 ## M3 — Iterações
 - [x] Export Guitar Pro (.gp) e MIDI no browser com o alphaTab, PDF por impressão na paleta clara (US-05, ADR-0007)
 - [ ] Partilha pública (US-06) — bloqueado por ADR-0003
+
+## Desktop (ADR-0008)
+- [x] Fase 1 — modo `env=desktop` na API e no worker: `LocalObjectStore` e `PUT /v1/local-storage/{key}` assinado (HMAC, ≤ 300 s, tipo e tamanho verificados), `POST /v1/auth/desktop` com token de arranque (sessão e CSRF do ADR-0006), link mágico desativado (404), `Host` só loopback, worker com fonte local, retenção a apagar ficheiros locais, ffmpeg/ffprobe configuráveis e `run_forever` para correr o loop numa thread
+- [ ] Programa de arranque `apps/desktop` (`pyproject.toml`/`uv.lock` próprios, `torch` CPU, overrides do ADR-0002, `pip-audit --strict`): gera os segredos por arranque, arranca API e worker no mesmo processo; a web troca o token em `POST /v1/auth/desktop`
+- [ ] Postgres 17 embutido (binários oficiais com checksum fixado, dados em `%LOCALAPPDATA%\TabForge`, só `127.0.0.1`, porta livre, password gerada, migrações Alembic em cada arranque)
+- [ ] Web com Next.js `output: "standalone"` servida por Node LTS embutido (`127.0.0.1:47800`, `NEXT_PUBLIC_API_URL` fixado no build)
+- [ ] Janela `pywebview` sobre o WebView2, com recurso ao browser predefinido
+- [ ] Empacotamento PyInstaller (`--onedir`) + Inno Setup → `TabForge-Setup.exe`, com ffmpeg LGPL embutido (checksum fixado)
+- [ ] CI `windows-latest`: constrói o instalador e faz smoke test sem janela (Postgres, migrações, upload de um WAV, espera pela tab, encerra)
