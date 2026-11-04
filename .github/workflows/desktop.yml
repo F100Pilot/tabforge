@@ -89,7 +89,8 @@ jobs:
 
       - name: PyInstaller
         working-directory: apps/desktop
-        run: uv run pyinstaller packaging/tabforge.spec --noconfirm
+        # start.bat syncs without the build group (uv sync removes PyInstaller): restore it here.
+        run: uv run --frozen --extra bundle --group build pyinstaller packaging/tabforge.spec --noconfirm
 
       - name: Smoke test (packaged app, real CPU pipeline, no window)
         working-directory: apps/desktop
