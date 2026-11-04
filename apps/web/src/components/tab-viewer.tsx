@@ -101,10 +101,6 @@ function TabHeader({
           <Link
             href={`/tabs/${encodeURIComponent(tab.id)}/edit`}
             className="btn btn-primary"
-            aria-disabled="true"
-            title="Em breve"
-            tabIndex={-1}
-            onClick={(e) => e.preventDefault()}
           >
             Editar
           </Link>
