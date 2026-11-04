@@ -1,14 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from sqlalchemy import text
 
 from tabforge_api.auth import CSRF_HEADER
 from tabforge_api.db import make_engine, make_session_factory
 from tabforge_api.limits import SlidingWindowLimiter
+from tabforge_api.local_storage import LocalObjectStore
 from tabforge_api.mailer import Mailer, build_mailer
 from tabforge_api.problems import ProblemError, install_problem_handlers
-from tabforge_api.routes import auth, jobs, me, tabs, uploads
-from tabforge_api.settings import Settings
+from tabforge_api.routes import auth, jobs, local_storage, me, tabs, uploads
+from tabforge_api.settings import LOOPBACK_HOSTS, Settings
 from tabforge_api.storage import ObjectStore, S3ObjectStore
 
 
@@ -19,6 +21,11 @@ def create_app(
 ) -> FastAPI:
     settings = settings or Settings()  # type: ignore[call-arg]  # fields come from env
     mailer = mailer or build_mailer(settings)  # fails closed outside dev without SMTP
+    local = settings.storage_backend == "local"
+    if local:
+        store = store or LocalObjectStore.from_settings(settings)
+        if not isinstance(store, LocalObjectStore):  # the upload route writes through it
+            raise ValueError("storage_backend=local needs a LocalObjectStore")
     app = FastAPI(title="TabForge API", version="0.1.0")
     engine = make_engine(settings.sqlalchemy_url)
     app.state.settings = settings
@@ -33,6 +40,9 @@ def create_app(
     app.state.magic_link_ip_limiter = SlidingWindowLimiter(
         auth.MAGIC_LINK_PER_IP, auth.MAGIC_LINK_WINDOW_S
     )
+    app.state.desktop_login_limiter = SlidingWindowLimiter(
+        auth.DESKTOP_LOGIN_PER_IP, auth.DESKTOP_LOGIN_WINDOW_S
+    )
 
     if settings.cors_origins:
         if "*" in settings.cors_origins:  # credentialed CORS needs explicit origins
@@ -41,8 +51,15 @@ def create_app(
             CORSMiddleware,
             allow_origins=settings.cors_origins,
             allow_credentials=True,
-            allow_methods=["GET", "POST", "DELETE"],
+            # PUT only for the local signed upload; with S3 the browser PUTs to the bucket.
+            allow_methods=["GET", "POST", "DELETE", *(["PUT"] if local else [])],
             allow_headers=["Content-Type", CSRF_HEADER],
+        )
+    if settings.env == "desktop":
+        # DNS rebinding (ADR-0008): only loopback Host headers reach the API. Added last, so it
+        # is the outermost middleware and runs before CORS. Starlette compares the host only.
+        app.add_middleware(
+            TrustedHostMiddleware, allowed_hosts=list(LOOPBACK_HOSTS), www_redirect=False
         )
     install_problem_handlers(app)
 
@@ -64,4 +81,6 @@ def create_app(
     app.include_router(uploads.router)
     app.include_router(jobs.router)
     app.include_router(tabs.router)
+    if local:
+        app.include_router(local_storage.router)
     return app
