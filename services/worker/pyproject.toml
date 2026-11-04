@@ -68,7 +68,10 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 # Fast CI skips ML tests; run them with `uv sync --extra ml --extra eval && uv run pytest -m ml`.
 addopts = "-m 'not ml'"
-markers = ["ml: needs the ml/eval extras (real model inference, mir_eval)"]
+markers = [
+  "ml: needs the ml/eval extras (real model inference, mir_eval)",
+  "db: needs Postgres at TABFORGE_TEST_DATABASE_URL (skipped when unset)",
+]
 
 [tool.uv]
 # Worker runs only in Linux containers. Without this, a demucs constraint for

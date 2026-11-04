@@ -83,7 +83,8 @@ jobs:
       - run: uv run pytest -q
       - name: Dependency audit (incl. ML extras)
         run: |
-          uv export --frozen --all-extras --no-hashes --no-emit-project > "$RUNNER_TEMP/req.txt"
+          # Our own path package (packages/score) is not on PyPI; its dependencies are still audited.
+          uv export --frozen --all-extras --no-hashes --no-emit-project --no-emit-package tabforge-score > "$RUNNER_TEMP/req.txt"
           uvx pip-audit --strict --no-deps --disable-pip -r "$RUNNER_TEMP/req.txt"
 
   docker:
