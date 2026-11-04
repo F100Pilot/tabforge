@@ -96,7 +96,7 @@ jobs:
       - run: docker build -f services/worker/Dockerfile -t tabforge-worker .
       - name: Worker image loads its models offline
         run: >-
-          docker run --rm --network none tabforge-worker uv run --no-sync python -c
+          docker run --rm --network none tabforge-worker python -c
           "from demucs.pretrained import get_model; get_model('htdemucs_6s');
           from tabforge_worker.adapters.basic_pitch import BasicPitchOnnxTranscriber;
           BasicPitchOnnxTranscriber(); print('models ok')"

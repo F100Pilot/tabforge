@@ -7,7 +7,8 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /usr/local/bin/uv
 WORKDIR /app/services/worker
-ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy HF_HOME=/opt/models/hf
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy HF_HOME=/opt/models/hf \
+    PATH=/app/services/worker/.venv/bin:$PATH
 COPY packages/score /app/packages/score
 COPY services/worker/pyproject.toml services/worker/uv.lock ./
 RUN uv sync --frozen --no-dev --extra ml --no-install-project
@@ -15,9 +16,10 @@ COPY services/worker/src ./src
 RUN uv sync --frozen --no-dev --extra ml
 # Bake the Demucs htdemucs_6s weights (safetensors) into the image, so the worker never
 # downloads code-adjacent artefacts at run time (Basic Pitch's ONNX model ships in its wheel).
-RUN uv run --no-sync python -c "from demucs.pretrained import get_model; get_model('htdemucs_6s')" \
+RUN python -c "from demucs.pretrained import get_model; get_model('htdemucs_6s')" \
  && chmod -R a+rX /opt/models
 RUN useradd --system --uid 10001 worker
 USER worker
 ENV HF_HUB_OFFLINE=1 TABFORGE_WORKER_PIPELINE=real NUMBA_CACHE_DIR=/tmp
-CMD ["uv", "run", "--no-sync", "python", "-m", "tabforge_worker"]
+# The venv is on PATH: the system user has no home, so `uv run` could not create its cache.
+CMD ["python", "-m", "tabforge_worker"]
