@@ -1,6 +1,6 @@
 # ADR-0002 — Pipeline de transcrição e dependências do worker
 
-- **Estado:** Proposto
+- **Estado:** Aceite para guitarra isolada (decisão M0, 2026-11-04); mistura com banda pendente de avaliação
 - **Data:** 2026-11-04
 
 ## Contexto
@@ -57,3 +57,9 @@ Conclusões:
 - Onsets e pitch dão um rascunho utilizável para guitarra isolada. Offsets e durações não (F1 0,55; 0,43 em acordes): a quantização rítmica (M2) não pode depender de offsets do Basic Pitch.
 - Correr o Demucs sobre uma stem já isolada não traz ganho e custa cerca de 20× mais CPU. A pipeline deve saltar a separação quando o utilizador faz upload de guitarra isolada.
 - A decisão go/no-go para áudio em mistura fica pendente de um set de avaliação com banda e fora do treino do Basic Pitch.
+
+### Decisão M0 (2026-11-04, aprovada pelo dono do produto)
+
+- **Go para guitarra isolada.** A pipeline Basic Pitch ONNX segue para o M1/M2 como está. Quando o input é uma stem isolada, não se corre o Demucs.
+- **Mistura com banda:** a avaliação faz-se com gravações próprias (não com BabySlakh, que está no treino do Basic Pitch e é 16 kHz). Até haver números, o upload de mistura não é prometido como funcionalidade de qualidade.
+- O set de gravações próprias serve também de avaliação fora do treino do Basic Pitch para a guitarra isolada.

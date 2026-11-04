@@ -7,22 +7,22 @@
 - Código + testes (unit; integração onde há I/O) · lint/type check verdes · review sem achados Critical/High · docs/ADR atualizados · CI verde.
 
 ## M0 — Spike de qualidade (antes de investir em UI)
-- [ ] Montar set de avaliação: 20 clips de guitarra (isolada e em mix) com tab de referência **de direitos livres ou próprios**
+- [ ] Montar set de avaliação: 20 clips de **gravações próprias** (isolada e em mistura com banda) com tab de referência. Serve para avaliar a mistura e a guitarra fora do treino do Basic Pitch (decisão M0). Correr com `eval/run_m0.py` adaptado
 - [x] Script de avaliação: note F1 (mir_eval) — `services/worker/eval/`. Precisão corda/traste fica para o M2 (não há atribuição ainda)
 - [x] Baseline Demucs 6s + Basic Pitch; registar resultados em `docs/eval/` — `docs/eval/M0-baseline.md` (guitarra isolada; mistura por medir)
-- [ ] Decisão go/no-go sobre a abordagem (atualizar ADR-0002)
+- [x] Decisão go/no-go sobre a abordagem (ADR-0002): **go para guitarra isolada**; mistura avaliada com gravações próprias
 
 ## M1 — Walking skeleton
 - [x] Monorepo, CI, docker-compose (Postgres, MinIO)
 - [ ] API: migrações iniciais (users, audio_assets, jobs, tabs, tab_revisions)
 - [ ] Upload pré-assinado + validação (US-01)
-- [ ] Worker: loop de fila SKIP LOCKED com etapas stub
+- [ ] Worker: loop de fila SKIP LOCKED com etapas stub; etapa de separação só para input em mistura (stem isolada salta o Demucs, ADR-0002)
 - [x] Teste de integração: inferência Basic Pitch ONNX real num clip sintético (guarda os overrides do ADR-0002) — feito no M0
 - [ ] Web: página que renderiza um alphaTex fixo com playback (US-03 parcial)
 - [ ] Fluxo ponta-a-ponta com pipeline stub
 
 ## M2 — MVP
-- [ ] Domínio: quantização rítmica (TDD)
+- [ ] Domínio: quantização rítmica (TDD), a partir de onsets e beats, sem depender de offsets do Basic Pitch (M0: F1 com offset de 0,55)
 - [ ] Domínio: atribuição corda/traste Viterbi (TDD)
 - [ ] Integração Demucs/Basic Pitch/librosa no worker (US-02)
 - [ ] Auth email + Google, eliminação de conta (US-07)
