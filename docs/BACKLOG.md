@@ -9,7 +9,7 @@
 ## M0 — Spike de qualidade (antes de investir em UI)
 - [ ] Montar set de avaliação: 20 clips de guitarra (isolada e em mix) com tab de referência **de direitos livres ou próprios**
 - [x] Script de avaliação: note F1 (mir_eval) — `services/worker/eval/`. Precisão corda/traste fica para o M2 (não há atribuição ainda)
-- [ ] Baseline Demucs 6s + Basic Pitch; registar resultados em `docs/eval/` — Basic Pitch feito (`docs/eval/M0-baseline.md`); Demucs bloqueado por rede
+- [x] Baseline Demucs 6s + Basic Pitch; registar resultados em `docs/eval/` — `docs/eval/M0-baseline.md` (guitarra isolada; mistura por medir)
 - [ ] Decisão go/no-go sobre a abordagem (atualizar ADR-0002)
 
 ## M1 — Walking skeleton
