@@ -2,7 +2,7 @@
 
 Tablaturas de guitarra interativas (render, playback, edição) geradas a partir de áudio com IA.
 
-> Estado: **walking skeleton**. Arquitetura proposta, aguarda aprovação. Ver [`docs/`](docs/).
+> Estado: **M1 — walking skeleton** (upload → fila → pipeline stub → tab renderizada). M0 em [`docs/eval/M0-baseline.md`](docs/eval/M0-baseline.md). Ver [`docs/`](docs/).
 
 ## Estrutura
 
@@ -17,16 +17,17 @@ docs/              PRD, arquitetura, ADRs, backlog
 
 - Node 22 + pnpm 10
 - [uv](https://docs.astral.sh/uv/) (gere o Python 3.13 automaticamente)
-- Docker (Postgres + MinIO locais)
+- Docker (Postgres + S3 local via versitygw, ADR-0004)
 
 ## Setup
 
 ```bash
 cp .env.example .env                       # editar passwords
-docker compose up -d postgres minio
-cd services/api && uv sync && uv run uvicorn tabforge_api.main:create_app --factory --reload
+docker compose up -d --build               # postgres, s3, migrate (Alembic + bucket), api, worker
 cd apps/web && pnpm install && pnpm dev    # http://localhost:3000
 ```
+
+Em M1 a autenticação é um stub: com `TABFORGE_DEV_AUTH=true` (só aceite com `TABFORGE_ENV=dev`) todos os pedidos usam um utilizador de dev. Sem isso, as rotas `/v1` respondem 401.
 
 Worker com stack ML (pesado, ~GBs): `cd services/worker && uv sync --extra ml`.
 
@@ -36,6 +37,8 @@ Worker com stack ML (pesado, ~GBs): `cd services/worker && uv sync --extra ml`.
 |---|---|
 | web | `pnpm lint && pnpm typecheck && pnpm test && pnpm build` |
 | api / worker | `uv run ruff check . && uv run ruff format --check . && uv run mypy src tests && uv run pytest` |
+| api / worker (integração) | definir `TABFORGE_TEST_DATABASE_URL` (Postgres) e `TABFORGE_TEST_S3_ENDPOINT` (S3); sem elas os testes `db`/`s3` são saltados |
+| worker (ML) | `uv sync --extra ml --extra eval && uv run pytest -m ml` |
 
 Pre-commit: `uvx pre-commit install` (correr `uvx pre-commit autoupdate` na primeira vez).
 
