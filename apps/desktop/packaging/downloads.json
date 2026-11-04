@@ -1,0 +1,21 @@
+{
+  "_comment": "Windows runtime pieces for the bundle (ADR-0008). sha256 null = not pinned yet: fetch.py fails and prints the hash to pin.",
+  "node": {
+    "url": "https://nodejs.org/dist/v24.22.1/node-v24.22.1-win-x64.zip",
+    "sha256": "d2046d28c2c3dcd211ac5145c0bf30e2047ef9dfb306693c8c6e2eccd8b95fa5",
+    "root": "node-v24.22.1-win-x64",
+    "copy": {"node.exe": "node/node.exe"}
+  },
+  "postgres": {
+    "url": "https://get.enterprisedb.com/postgresql/postgresql-17.6-1-windows-x64-binaries.zip",
+    "sha256": null,
+    "root": "pgsql",
+    "copy": {"bin": "pgsql/bin", "lib": "pgsql/lib", "share": "pgsql/share"}
+  },
+  "ffmpeg": {
+    "url": "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-7.1.1-essentials_build.zip",
+    "sha256": null,
+    "root": "ffmpeg-7.1.1-essentials_build",
+    "copy": {"bin/ffmpeg.exe": "ffmpeg/ffmpeg.exe", "bin/ffprobe.exe": "ffmpeg/ffprobe.exe"}
+  }
+}

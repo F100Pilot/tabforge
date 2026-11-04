@@ -1,0 +1,79 @@
+[project]
+name = "tabforge-desktop"
+version = "0.1.0"
+description = "TabForge for Windows: launcher that embeds Postgres, the API, the worker and the web app (ADR-0008)"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "tabforge-api",
+  "tabforge-worker",
+  "tabforge-score>=0.2.0",
+  "uvicorn>=0.30",
+  "psycopg[binary]>=3.3,<4",
+]
+
+[project.optional-dependencies]
+# Installed only for the Windows bundle (PyInstaller). Linux tests run without it.
+bundle = [
+  "tabforge-worker[ml]",
+  "pywebview>=6.2,<7",
+]
+
+[project.scripts]
+tabforge = "tabforge_desktop.__main__:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "ruff>=0.6",
+  "mypy>=1.11",
+]
+build = [
+  "pyinstaller>=6.22,<7",
+]
+
+[tool.uv.sources]
+tabforge-api = { path = "../../services/api" }
+tabforge-worker = { path = "../../services/worker" }
+tabforge-score = { path = "../../packages/score" }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tabforge_desktop"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "N", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]
+
+[tool.mypy]
+strict = true
+python_version = "3.13"
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["tabforge_api.*", "tabforge_worker.*", "webview.*", "boto3.*", "botocore.*", "demucs.*", "torch.*", "basic_pitch.*", "librosa.*", "numpy.*", "soundfile.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "postgres: needs PostgreSQL server binaries (TABFORGE_TEST_PG_BIN) and a non-root user",
+]
+
+[tool.uv]
+# Desktop builds for Windows; Linux only for tests in CI. The ML stack (bundle extra) resolves
+# torch from PyPI, whose Windows wheels are CPU-only (ADR-0008).
+environments = ["sys_platform == 'win32'", "sys_platform == 'linux'"]
+# Same overrides as services/worker (ADR-0002): no TensorFlow, resampy without pkg_resources.
+override-dependencies = [
+  "tensorflow; sys_platform == 'never'",
+  "resampy>=0.4.3",
+]

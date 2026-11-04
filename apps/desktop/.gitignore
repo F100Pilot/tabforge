@@ -1,0 +1,3 @@
+# Desktop bundle inputs and PyInstaller/Inno Setup outputs (ADR-0008)
+/build/
+/dist/

@@ -1,0 +1,105 @@
+name: Desktop (Windows)
+
+# Builds TabForge-Setup.exe and smoke-tests the packaged app (ADR-0008).
+on:
+  pull_request:
+    paths:
+      - "apps/desktop/**"
+      - "apps/web/**"
+      - "services/**"
+      - "packages/**"
+      - ".github/workflows/desktop.yml"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: apps/web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+
+      - name: Web (standalone, desktop build)
+        working-directory: apps/web
+        env:
+          TABFORGE_WEB_OUTPUT: standalone
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:47801
+          NEXT_PUBLIC_TABFORGE_DESKTOP: "1"
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+          $web = "..\desktop\build\bundle\web"
+          New-Item -ItemType Directory -Force $web | Out-Null
+          Copy-Item -Recurse -Force .next\standalone\* $web
+          Copy-Item -Recurse -Force public "$web\public"
+          New-Item -ItemType Directory -Force "$web\.next" | Out-Null
+          Copy-Item -Recurse -Force .next\static "$web\.next\static"
+
+      - name: Python environment (ML stack, PyInstaller)
+        working-directory: apps/desktop
+        run: uv sync --frozen --extra bundle --group build
+
+      - name: Runtime downloads (Node, PostgreSQL, ffmpeg; SHA-256 pinned)
+        working-directory: apps/desktop
+        run: uv run python packaging/fetch.py
+
+      - name: Demucs weights into the bundle
+        working-directory: apps/desktop
+        run: |
+          $env:HF_HOME = "$PWD\build\bundle\models\hf"
+          uv run python -c "from demucs.pretrained import get_model; get_model('htdemucs_6s')"
+
+      - name: PyInstaller
+        working-directory: apps/desktop
+        run: uv run pyinstaller packaging/tabforge.spec --noconfirm
+
+      - name: Smoke test (packaged app, real CPU pipeline, no window)
+        working-directory: apps/desktop
+        run: |
+          $env:TABFORGE_DATA_DIR = "$env:RUNNER_TEMP\tabforge-data"
+          $p = Start-Process -FilePath dist\TabForge\TabForge.exe -ArgumentList "--smoke" -Wait -PassThru
+          Get-ChildItem "$env:TABFORGE_DATA_DIR\logs" -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "=== $($_.Name) ==="; Get-Content $_.FullName -Tail 80
+          }
+          if ($p.ExitCode -ne 0) { throw "smoke test failed with exit code $($p.ExitCode)" }
+          if (-not (Select-String -Path "$env:TABFORGE_DATA_DIR\logs\tabforge.log" -Pattern "smoke_ok" -Quiet)) {
+            throw "smoke_ok not logged"
+          }
+
+      - name: Installer (Inno Setup)
+        working-directory: apps/desktop
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress }
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc packaging\installer.iss
+          Get-Item dist\TabForge-Setup.exe | Select-Object Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TabForge-Setup
+          path: apps/desktop/dist/TabForge-Setup.exe
+          retention-days: 14
