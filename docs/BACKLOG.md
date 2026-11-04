@@ -22,7 +22,7 @@
 - [x] Fluxo ponta-a-ponta com pipeline stub, verificado no Chromium contra API, worker e S3 reais. Automatizar em CI fica no item E2E Playwright do M2
 
 ## M2 — MVP
-- [ ] Wireframes (upload, progresso, viewer, editor) aprovados antes de começar a UI do M2 (Fase 2 do SDLC)
+- [x] Wireframes (upload, progresso, viewer, editor) aprovados antes de começar a UI do M2 (Fase 2 do SDLC) — decisões em `docs/ui/design.md`
 - [ ] Tema da pauta claro/escuro à escolha do utilizador (preferência guardada; por defeito segue o tema da interface). alphaTab 1.9 `display.resources`, paletas validadas no render dos wireframes:
   - escura: fundo `#14171C`, mainGlyph `#E6E8EB`, secondaryGlyph `#9AA1AC`, staffLine `#4A505B`, barSeparator `#8A919C`, barNumber `#F2B544`, scoreInfo `#C9CED6`
   - clara: fundo `#FAFAF7`, mainGlyph `#1B1D21`, secondaryGlyph `#6B7079`, staffLine `#A3A39B`, barSeparator `#4A4E55`, barNumber `#9A6A12`, scoreInfo `#1B1D21`
