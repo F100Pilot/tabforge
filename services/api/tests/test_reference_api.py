@@ -405,3 +405,229 @@ def test_track_must_be_a_non_negative_integer(
     assert client.get(url).status_code == 422
     assert client.delete(url).status_code == 422
     assert client.get(f"/v1/tabs/{tab}/comparison?track={track}").status_code == 422
+
+
+# Differences and position corrections (ADR-0009) -------------------------------------------------
+
+
+def _moved(notes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The reference plays frets 5 and up of string 6 as the same pitch on string 5."""
+    return [{**n, "string": 5, "fret": n["fret"] - 5} if n["fret"] >= 5 else dict(n) for n in notes]
+
+
+MOVED = 3  # notes of _score() on string 6 at fret 5 or more
+
+
+def _rev(client: TestClient, tab: str) -> str:
+    return str(client.get(f"/v1/tabs/{tab}").json()["revision"]["id"])
+
+
+def test_comparison_without_differences_has_zero_counts(client: TestClient, engine: Engine) -> None:
+    tab = _tab(engine)
+    client.put(f"/v1/tabs/{tab}/reference", json=_body())
+    diffs = client.get(f"/v1/tabs/{tab}/comparison").json()["differences"]
+    assert diffs == {
+        "counts": {"position": 0, "missing": 0, "extra": 0, "timing": 0},
+        "items": [],
+        "truncated": False,
+    }
+
+
+def test_comparison_lists_the_differences_by_onset(client: TestClient, engine: Engine) -> None:
+    tab = _tab(engine)
+    notes = _moved(_notes())
+    notes[1]["onset"] += 0.2  # timing (string 6 fret 2 stays)
+    notes.pop(0)  # extra: the AI's first note is not in the reference
+    notes.append(
+        {"onset": 50.0, "pitch": 100, "string": 1, "fret": 0, "bar": 13}
+    )  # missing: not in the AI
+    client.put(f"/v1/tabs/{tab}/reference", json=_body(notes))
+    diffs = client.get(f"/v1/tabs/{tab}/comparison").json()["differences"]
+    assert diffs["counts"] == {"position": MOVED, "missing": 1, "extra": 1, "timing": 1}
+    assert diffs["truncated"] is False
+    items = diffs["items"]
+    assert [i["onset"] for i in items] == sorted(i["onset"] for i in items)
+    assert items[0]["kind"] == "extra" and items[0]["onset"] == 0
+    assert items[0]["ref"] is None and items[0]["ai"] == {
+        "string": 6,
+        "fret": 1,
+        "bar": 1,
+        "beat": 0,
+    }
+    assert items[-1]["kind"] == "missing" and items[-1]["ai"] is None
+    assert items[-1]["ref"] == {"string": 1, "fret": 0}
+    timing = next(i for i in items if i["kind"] == "timing")
+    assert timing["onset_error"] == pytest.approx(0.2)
+    assert timing["ai"] == {"string": 6, "fret": 2, "bar": 1, "beat": 1}
+    position = next(i for i in items if i["kind"] == "position")
+    assert position["ref"] == {"string": 5, "fret": 0}
+    assert position["ai"]["string"] == 6 and position["ai"]["fret"] == 5
+
+
+def test_comparison_differences_are_capped_at_500_but_counted_fully(
+    client: TestClient, engine: Engine
+) -> None:
+    bars = 150  # 600 notes, none of which the reference has
+    beat = {"duration": 4, "notes": [{"string": 6, "fret": 1}]}
+    score = {**_score(), "bars": [{"beats": [beat] * 4}] * bars}
+    tab = _tab(engine, score=score)
+    far = [
+        {"onset": float(i), "pitch": 100, "string": 1, "fret": 0, "bar": i // 4 + 1}
+        for i in range(600)
+    ]
+    client.put(f"/v1/tabs/{tab}/reference", json=_body(far))
+    diffs = client.get(f"/v1/tabs/{tab}/comparison").json()["differences"]
+    assert diffs["counts"] == {"position": 0, "missing": 600, "extra": 600, "timing": 0}
+    assert len(diffs["items"]) == 500
+    assert diffs["truncated"] is True
+
+
+def _apply(client: TestClient, tab: str, base: str, **extra: Any) -> Any:
+    body = {"base_revision_id": base, "kinds": ["position"], **extra}
+    return client.post(f"/v1/tabs/{tab}/comparison/apply", json=body)
+
+
+def test_apply_corrects_positions_in_a_new_current_revision(
+    client: TestClient, engine: Engine
+) -> None:
+    tab = _tab(engine)
+    client.put(f"/v1/tabs/{tab}/reference", json=_body(_moved(_notes())))
+    base = _rev(client, tab)
+    before = client.get(f"/v1/tabs/{tab}/comparison").json()
+    assert before["position_accuracy"] == pytest.approx(0.75)
+    resp = _apply(client, tab, base)
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert (body["applied"], body["skipped"]) == (MOVED, 0)
+    revision = body["tab"]["revision"]
+    assert revision["id"] != base and revision["source"] == "user"
+    assert body["tab"]["id"] == tab and "alphatex" in body["tab"]
+    assert _rev(client, tab) == revision["id"]
+    assert len(client.get(f"/v1/tabs/{tab}/revisions").json()["items"]) == 2
+    after = client.get(f"/v1/tabs/{tab}/comparison").json()
+    assert after["position_accuracy"] == 1
+    assert after["differences"]["counts"]["position"] == 0
+    assert after["revision_id"] == revision["id"]
+    # The earlier revision is kept as it was.
+    old = client.get(f"/v1/tabs/{tab}/revisions/{base}").json()
+    assert old["score"]["bars"][2]["beats"][3]["notes"][0]["string"] == 6
+
+
+def test_apply_with_nothing_to_correct_creates_no_revision(
+    client: TestClient, engine: Engine
+) -> None:
+    tab = _tab(engine)
+    client.put(f"/v1/tabs/{tab}/reference", json=_body())
+    base = _rev(client, tab)
+    resp = _apply(client, tab, base)
+    assert resp.status_code == 200
+    assert (resp.json()["applied"], resp.json()["skipped"]) == (0, 0)
+    assert resp.json()["tab"]["revision"]["id"] == base
+    assert len(client.get(f"/v1/tabs/{tab}/revisions").json()["items"]) == 1
+
+
+def test_apply_on_track_1_leaves_track_0_alone(client: TestClient, engine: Engine) -> None:
+    tab = _tab(engine, score=_v3_score())
+    rhythm = [
+        {**n, "string": 3, "fret": n["fret"] - 5}  # string 4 fret 7+ -> string 3, same pitch
+        for n in _track_notes(1)
+    ]
+    client.put(f"/v1/tabs/{tab}/reference?track=1", json=_body(rhythm))
+    base = _rev(client, tab)
+    resp = client.post(
+        f"/v1/tabs/{tab}/comparison/apply?track=1",
+        json={"base_revision_id": base, "kinds": ["position"]},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["applied"] == 2 * BARS
+    tracks = resp.json()["tab"]["revision"]["score"]["tracks"]
+
+    def positions(track: dict[str, Any]) -> list[tuple[int, int]]:
+        return [
+            (n["string"], n["fret"])
+            for bar in track["bars"]
+            for beat in bar["beats"]
+            for n in beat["notes"]
+        ]
+
+    assert positions(tracks[0]) == positions(_v3_score()["tracks"][0])
+    assert {n["string"] for b in tracks[1]["bars"] for x in b["beats"] for n in x["notes"]} == {3}
+
+
+def test_apply_with_a_stale_base_is_409(client: TestClient, engine: Engine) -> None:
+    tab = _tab(engine)
+    client.put(f"/v1/tabs/{tab}/reference", json=_body(_moved(_notes())))
+    base = _rev(client, tab)
+    saved = client.post(
+        f"/v1/tabs/{tab}/revisions", json={"base_revision_id": base, "score": _score()}
+    )
+    assert saved.status_code == 201
+    resp = _apply(client, tab, base)
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "revision_conflict"
+    assert len(client.get(f"/v1/tabs/{tab}/revisions").json()["items"]) == 2
+
+
+def test_apply_without_a_reference_is_404(client: TestClient, engine: Engine) -> None:
+    tab = _tab(engine)
+    resp = _apply(client, tab, _rev(client, tab))
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "reference_not_found"
+
+
+def test_apply_with_a_missing_track_is_422(client: TestClient, engine: Engine) -> None:
+    tab = _tab(engine)
+    resp = client.post(
+        f"/v1/tabs/{tab}/comparison/apply?track=3",
+        json={"base_revision_id": _rev(client, tab), "kinds": ["position"]},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "invalid_track"
+
+
+@pytest.mark.parametrize("kinds", [["timing"], ["position", "missing"], ["nope"]])
+def test_apply_only_supports_position(client: TestClient, engine: Engine, kinds: list[str]) -> None:
+    tab = _tab(engine)
+    client.put(f"/v1/tabs/{tab}/reference", json=_body(_moved(_notes())))
+    resp = _apply(client, tab, _rev(client, tab), kinds=kinds)
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "unsupported_correction"
+    assert len(client.get(f"/v1/tabs/{tab}/revisions").json()["items"]) == 1
+
+
+def test_apply_on_another_users_tab_is_404(client: TestClient, engine: Engine) -> None:
+    tab = _tab(engine, "other@example.com")
+    base = "00000000-0000-4000-8000-000000000000"
+    resp = _apply(client, tab, base)
+    assert resp.status_code == 404
+
+
+def test_apply_needs_csrf_with_cookie_auth(
+    engine: Engine, database_url: str, store: FakeStore, mailer: FakeMailer
+) -> None:
+    settings = _settings(database_url, dev_auth=False, session_cookie_secure=False)
+    auth = TestClient(create_app(settings, store=store, mailer=mailer))
+    with engine.begin() as conn:
+        user = conn.execute(
+            text("INSERT INTO users (email) VALUES ('apply@example.com') RETURNING id")
+        ).scalar_one()
+        tab = _tab_for(conn, str(user))
+        base = str(
+            conn.execute(
+                text("SELECT current_revision_id FROM tabs WHERE id = :t"), {"t": tab}
+            ).scalar_one()
+        )
+        conn.execute(
+            text(
+                "INSERT INTO sessions (user_id, token_hash, csrf_token, expires_at) "
+                "VALUES (:u, :h, 'csrf-secret', now() + interval '1 day')"
+            ),
+            {"u": user, "h": hashlib.sha256(b"cookie").hexdigest()},
+        )
+    auth.cookies.set(SESSION_COOKIE, "cookie")
+    headers = {"X-CSRF-Token": "csrf-secret"}
+    auth.put(f"/v1/tabs/{tab}/reference", json=_body(_moved(_notes())), headers=headers)
+    url = f"/v1/tabs/{tab}/comparison/apply"
+    body = {"base_revision_id": base, "kinds": ["position"]}
+    assert auth.post(url, json=body).status_code == 403
+    assert auth.post(url, json=body, headers=headers).status_code == 201

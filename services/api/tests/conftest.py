@@ -102,5 +102,9 @@ def mailer() -> FakeMailer:
 
 
 @pytest.fixture
-def client(engine: Engine, database_url: str, store: FakeStore, mailer: FakeMailer) -> TestClient:
-    return TestClient(create_app(_settings(database_url), store=store, mailer=mailer))
+def client(
+    engine: Engine, database_url: str, store: FakeStore, mailer: FakeMailer
+) -> Iterator[TestClient]:
+    app = create_app(_settings(database_url), store=store, mailer=mailer)
+    yield TestClient(app)
+    app.state.engine.dispose()  # else every test leaves a pooled connection until GC

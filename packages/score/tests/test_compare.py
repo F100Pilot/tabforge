@@ -5,7 +5,7 @@ from fractions import Fraction
 import pytest
 
 from tabforge_score import Score
-from tabforge_score.compare import NoteEvent, compare, score_events
+from tabforge_score.compare import NoteEvent, compare, corrected_score, score_events
 
 STANDARD = [64, 59, 55, 50, 45, 40]  # string 1 (high E) first
 
@@ -129,3 +129,166 @@ def test_empty_inputs_do_not_divide_by_zero() -> None:
     result = compare([], RIFF)
     assert result.recall == 0.0 and result.precision == 0.0 and result.f1 == 0.0
     assert result.position_accuracy is None
+
+
+# differences and corrections ------------------------------------------------------------------
+
+
+def _diffs(ai: list[NoteEvent], ref: list[NoteEvent]) -> list[tuple[str, float]]:
+    return [(d.kind, d.onset) for d in compare(ai, ref, shifts=False).differences]
+
+
+def test_score_events_set_the_beat_index() -> None:
+    score = _score(
+        [[_q(6, 0), _q(5, 2), _q(4, 2), _q(3, 1)], [_q(2, 0), _q(1, 0), _q(1, 3), _q(1, 5)]]
+    )
+    assert [e.beat_index for e in score_events(score)] == [0, 1, 2, 3, 0, 1, 2, 3]
+    assert NoteEvent(onset=0, pitch=40, string=6, fret=0).beat_index is None
+
+
+def test_identical_tabs_have_no_differences() -> None:
+    notes = [_ev(0, 6, 0), _ev(1, 5, 2)]
+    assert compare(notes, notes).differences == ()
+
+
+def test_position_difference_lists_both_positions() -> None:
+    ref = [_ev(0, 5, 0)]  # A2 is the open A string in the correct tab...
+    ai = [
+        NoteEvent(onset=0, pitch=45, string=6, fret=5, bar=2, beat_index=3)
+    ]  # ...not low E fret 5
+    (diff,) = compare(ai, ref, shifts=False).differences
+    assert (diff.kind, diff.pitch, diff.bar) == ("position", 45, 1)
+    assert (diff.ai_string, diff.ai_fret, diff.ref_string, diff.ref_fret) == (6, 5, 5, 0)
+    assert (diff.ai_bar, diff.ai_beat, diff.onset_error) == (2, 3, 0)
+
+
+def test_timing_difference_needs_more_than_an_eighth_of_a_quarter() -> None:
+    ref = [_ev(0, 6, 0), _ev(1, 6, 0), _ev(2, 6, 0)]
+    ai = [_ev(0.125, 6, 0), _ev(1.2, 6, 0), _ev(2, 6, 0)]
+    diffs = compare(ai, ref, shifts=False).differences
+    assert [(d.kind, d.onset) for d in diffs] == [("timing", 1)]
+    assert diffs[0].onset_error == pytest.approx(0.2)
+    assert (diffs[0].ai_string, diffs[0].ref_string) == (6, 6)
+
+
+def test_position_is_reported_before_timing_when_both_differ() -> None:
+    ai = [_ev(0.2, 6, 5)]
+    ref = [_ev(0, 5, 0)]
+    assert [d.kind for d in compare(ai, ref, shifts=False).differences] == ["position"]
+
+
+def test_missing_and_extra_notes_are_ordered_by_onset() -> None:
+    ref = [_ev(0, 6, 0), _ev(1, 6, 1), _ev(3, 6, 3)]
+    ai = [_ev(0, 6, 0), _ev(2, 5, 0), _ev(3, 6, 3)]
+    result = compare(ai, ref, shifts=False)
+    assert [(d.kind, d.onset) for d in result.differences] == [("missing", 1), ("extra", 2)]
+    missing, extra = result.differences
+    assert (missing.ai_string, missing.ref_string, missing.ref_fret) == (None, 6, 1)
+    assert (extra.ai_string, extra.ai_fret, extra.ref_string) == (5, 0, None)
+
+
+def test_extra_onset_uses_scale_and_shift() -> None:
+    ref = [_ev(4, 6, 0), _ev(6, 6, 1)]
+    ai = [_ev(0, 6, 0), _ev(1, 6, 1), _ev(2.5, 5, 0)]
+    result = compare(ai, ref)
+    assert (result.scale, result.shift) == (2.0, 4.0)
+    assert [(d.kind, d.onset) for d in result.differences] == [("extra", 9.0)]
+
+
+def _reference(score: Score, track: int = 0) -> list[NoteEvent]:
+    return [
+        NoteEvent(e.onset, e.pitch, e.string, e.fret, e.bar) for e in score_events(score, track)
+    ]
+
+
+def _pad(*beats: dict[str, object]) -> list[dict[str, object]]:
+    """One 4/4 bar: the given quarter beats, then quarter rests."""
+    return [*beats, *({"duration": 4, "notes": []},) * (4 - len(beats))]
+
+
+def test_corrected_score_moves_notes_to_the_reference_positions() -> None:
+    wrong = _score([[_q(6, 5), _q(5, 5), _q(4, 2), _q(3, 0)]])  # A2, D3, E3, G3
+    right = _score([[_q(5, 0), _q(4, 0), _q(4, 2), _q(3, 0)]])
+    fixed, applied, skipped = corrected_score(wrong, 0, _reference(right))
+    assert (applied, skipped) == (2, 0)
+    assert fixed == right
+    assert wrong.bars[0].beats[0].notes[0].string == 6  # input untouched
+
+
+def test_corrected_score_moves_a_chord_note_without_touching_the_others() -> None:
+    chord = {"duration": 1, "notes": [{"string": 6, "fret": 5}, {"string": 3, "fret": 2}]}
+    right_chord = {"duration": 1, "notes": [{"string": 5, "fret": 0}, {"string": 3, "fret": 2}]}
+    fixed, applied, _ = corrected_score(_score([[chord]]), 0, _reference(_score([[right_chord]])))
+    assert applied == 1
+    assert {(n.string, n.fret) for n in fixed.bars[0].beats[0].notes} == {(5, 0), (3, 2)}
+
+
+def test_corrected_score_moves_tie_continuations_with_the_attack() -> None:
+    def chain(string: int, fret: int) -> list[list[dict[str, object]]]:
+        rest = {"duration": 4, "notes": []}
+        return [
+            [rest, rest, _q(string, fret), _q(string, fret, tie=True)],
+            [_q(string, fret, tie=True), _q(string, fret, tie=True), rest, _q(string, fret)],
+        ]
+
+    wrong, right = _score(chain(6, 5)), _score(chain(5, 0))
+    fixed, applied, skipped = corrected_score(wrong, 0, _reference(right))
+    assert (applied, skipped) == (2, 0)  # the tied notes moved with their attacks
+    assert fixed == right
+
+
+def test_corrected_score_skips_when_the_target_string_is_taken() -> None:
+    chord = {"duration": 1, "notes": [{"string": 6, "fret": 5}, {"string": 5, "fret": 5}]}
+    ref = [_ev(0, 5, 0), _ev(0, 4, 0)]  # A2 should be 5/0, D3 should be 4/0
+    fixed, applied, skipped = corrected_score(_score([[chord]]), 0, ref)
+    # 6/5 -> 5/0 is blocked (string 5 busy); then 5/5 -> 4/0 is free and goes through.
+    assert (applied, skipped) == (1, 1)
+    assert {(n.string, n.fret) for n in fixed.bars[0].beats[0].notes} == {(6, 5), (4, 0)}
+
+
+def test_corrected_score_skips_when_a_tie_chain_beat_uses_the_target_string() -> None:
+    first = {"duration": 2, "notes": [{"string": 6, "fret": 5}]}
+    second = {
+        "duration": 2,
+        "notes": [{"string": 6, "fret": 5, "tie": True}, {"string": 5, "fret": 3}],
+    }
+    wrong = _score([[first, second]])
+    fixed, applied, skipped = corrected_score(wrong, 0, [_ev(0, 5, 0)])
+    assert (applied, skipped) == (0, 1)
+    assert fixed == wrong
+
+
+def test_corrected_score_skips_fret_out_of_range_and_pitch_changes() -> None:
+    wrong = _score([_pad(_q(6, 5), _q(6, 7))])
+    high = NoteEvent(onset=0, pitch=45, string=5, fret=0)
+    low = NoteEvent(onset=1, pitch=47, string=4, fret=-3)  # impossible fret
+    other = NoteEvent(onset=1, pitch=47, string=5, fret=0)  # 5/0 is 45, not 47
+    assert corrected_score(wrong, 0, [high, low])[1:] == (1, 1)
+    assert corrected_score(wrong, 0, [other])[1:] == (0, 1)
+
+
+def test_corrected_score_in_v3_only_changes_the_chosen_track() -> None:
+    bars = [{"beats": _pad(_q(6, 5))}]
+    v3 = Score.model_validate(
+        {
+            "schema_version": 3,
+            "tempo_bpm": 100,
+            "time_signature": [4, 4],
+            "tracks": [
+                {"name": "Lead", "tuning": STANDARD, "bars": bars},
+                {"name": "Rhythm", "tuning": STANDARD, "bars": bars},
+            ],
+        }
+    )
+    fixed, applied, _ = corrected_score(v3, 1, [_ev(0, 5, 0)])
+    assert applied == 1
+    assert fixed.schema_version == 3
+    assert fixed.tracks[0] == v3.tracks[0]
+    assert fixed.tracks[1].bars[0].beats[0].notes[0].string == 5
+
+
+def test_a_corrected_score_compares_perfectly() -> None:
+    wrong = _score([[_q(6, 5), _q(5, 5), _q(4, 2), _q(3, 0)]])
+    reference = _reference(_score([[_q(5, 0), _q(4, 0), _q(4, 2), _q(3, 0)]]))
+    fixed, _, _ = corrected_score(wrong, 0, reference)
+    assert compare(score_events(fixed), reference).position_accuracy == 1
