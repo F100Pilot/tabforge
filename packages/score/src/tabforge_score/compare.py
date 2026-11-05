@@ -56,18 +56,26 @@ class Comparison:
     bars: tuple[BarResult, ...]
 
 
-def score_events(score: Score) -> list[NoteEvent]:
-    """Attacked notes of a Score (tie continuations are not new notes)."""
+def score_events(score: Score, track: int = 0) -> list[NoteEvent]:
+    """Attacked notes of one track of a Score (tie continuations are not new notes).
+
+    `track` indexes `score.track_list()` (a v1/v2 score has only track 0); a track that does not
+    exist, negative indices included, raises IndexError.
+    """
+    tracks = score.track_list()
+    if not 0 <= track < len(tracks):
+        raise IndexError(f"track {track} does not exist, the score has {len(tracks)}")
+    chosen = tracks[track]
     events: list[NoteEvent] = []
     position = Fraction(0)  # whole notes
-    for index, bar in enumerate(score.bars, 1):
+    for index, bar in enumerate(chosen.bars, 1):
         for beat in bar.beats:
             for note in beat.notes:
                 if not note.tie:
                     events.append(
                         NoteEvent(
                             onset=position * 4,
-                            pitch=score.tuning[note.string - 1] + note.fret,
+                            pitch=chosen.tuning[note.string - 1] + note.fret,
                             string=note.string,
                             fret=note.fret,
                             bar=index,
