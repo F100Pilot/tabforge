@@ -563,6 +563,22 @@ button:disabled,
   padding: 0.75rem 0.75rem 6.5rem;
   overflow-x: auto;
 }
+/* alphaTab creates the playback cursors but leaves them unstyled (invisible): the bar being
+   played, the beat line and the notes sounding now. Translucent so they read on both score
+   themes. */
+.at-host .at-cursor-bar {
+  background: rgb(242 181 68 / 0.16);
+}
+.at-host .at-cursor-beat {
+  background: rgb(242 181 68 / 0.85);
+}
+.at-host .at-selection div {
+  background: rgb(242 181 68 / 0.12);
+}
+.at-host .at-highlight * {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
 .player {
   position: absolute;
   left: 50%;
