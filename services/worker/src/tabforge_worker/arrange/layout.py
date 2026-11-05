@@ -1,4 +1,4 @@
-"""Quantized events + string/fret positions -> Score v2 (bars, beats, ties, warnings).
+"""Quantized events + string/fret positions -> Score v2, or v3 with tracks (bars, ties, warnings).
 
 Durations are written with plain or dotted values on a binary grid; a beat marked as triplet is
 written as three triplet eighths (notes or rests). A note longer than one value, or crossing a
@@ -83,8 +83,10 @@ def decompose(start: int, length: int, triplet_beats: frozenset[int]) -> list[Pi
     return pieces
 
 
-def build_score(quantized: Quantized, fretted: Sequence[Fretted], tuning: Sequence[int]) -> Score:
-    """Assemble a validated Score v2. `tuning`: open-string MIDI pitches, string 1 first."""
+def _track_content(
+    quantized: Quantized, fretted: Sequence[Fretted]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """(bars, warnings) of one guitar, as Score JSON."""
     if len(fretted) != len(quantized.events):
         raise ValueError("build_score needs one Fretted per event")
 
@@ -120,13 +122,48 @@ def build_score(quantized: Quantized, fretted: Sequence[Fretted], tuning: Sequen
         for event, placed in zip(quantized.events, fretted, strict=True)
         for pitch, code in placed.dropped
     ]
+    return [{"beats": beats} for beats in bars], warnings
+
+
+def build_score(quantized: Quantized, fretted: Sequence[Fretted], tuning: Sequence[int]) -> Score:
+    """Assemble a validated Score v2. `tuning`: open-string MIDI pitches, string 1 first."""
+    bars, warnings = _track_content(quantized, fretted)
     return Score.model_validate(
         {
             "schema_version": 2,
             "tempo_bpm": quantized.tempo_bpm,
             "time_signature": [4, 4],
             "tuning": list(tuning),
-            "bars": [{"beats": beats} for beats in bars],
+            "bars": bars,
             "warnings": warnings,
+        }
+    )
+
+
+def build_tracks_score(
+    tracks: Sequence[tuple[str, Quantized, Sequence[Fretted]]], tuning: Sequence[int]
+) -> Score:
+    """Assemble a validated Score v3 (ADR-0010) from (name, quantized, fretted) per track.
+
+    The tracks must share the tempo and the length in ticks (quantize them with the same `span`
+    and pad the shorter ones), so that they have the same bars.
+    """
+    if not tracks:
+        raise ValueError("build_tracks_score needs at least one track")
+    if (
+        len({q.tempo_bpm for _, q, _ in tracks}) > 1
+        or len({q.total_ticks for _, q, _ in tracks}) > 1
+    ):
+        raise ValueError("tracks must share tempo and length")
+    content = []
+    for name, quantized, fretted in tracks:
+        bars, warnings = _track_content(quantized, fretted)
+        content.append({"name": name, "tuning": list(tuning), "bars": bars, "warnings": warnings})
+    return Score.model_validate(
+        {
+            "schema_version": 3,
+            "tempo_bpm": tracks[0][1].tempo_bpm,
+            "time_signature": [4, 4],
+            "tracks": content,
         }
     )

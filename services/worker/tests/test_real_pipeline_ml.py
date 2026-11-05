@@ -29,11 +29,15 @@ def test_real_pipeline_transcribes_synthetic_clip() -> None:
     def no_separator() -> None:
         raise AssertionError("guitar_stem must not load Demucs")
 
+    def no_stereo() -> None:
+        raise AssertionError("guitar_stem must not split Lead/Rhythm")
+
     pipe = RealPipeline(
         source=ToneSource(),
         transcriber=BasicPitchOnnxTranscriber,
         separator=no_separator,  # type: ignore[arg-type]
         beat_tracker=LibrosaBeatTracker,
+        stereo=no_stereo,  # type: ignore[arg-type]
     )
     job = ClaimedJob(uuid.uuid4(), uuid.uuid4(), 1, "guitar_stem", uuid.uuid4(), "k", "audio/wav")
     result = pipe.process(job, lambda _: None)

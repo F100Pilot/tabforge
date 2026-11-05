@@ -3,6 +3,7 @@
 import hashlib
 import shutil
 import uuid
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -41,6 +42,15 @@ class FakeBeats:
         return [0.0, 0.5, 1.0, 1.5]
 
 
+class FakeStereo:
+    def __init__(self) -> None:
+        self.inputs: list[Path] = []
+
+    def side_ratios(self, audio: Path, notes: Sequence[NoteEvent]) -> list[float] | None:
+        self.inputs.append(audio)
+        return None
+
+
 class FakeSeparator:
     def __init__(self) -> None:
         self.inputs: list[Path] = []
@@ -59,15 +69,23 @@ def _job(kind: str) -> ClaimedJob:
 def _pipeline(
     source: FakeSource, **kw: object
 ) -> tuple[RealPipeline, FakeTranscriber, FakeSeparator]:
-    transcriber, separator = FakeTranscriber(), FakeSeparator()
+    pipe, transcriber, separator, _ = _pipeline_with_stereo(source, **kw)
+    return pipe, transcriber, separator
+
+
+def _pipeline_with_stereo(
+    source: FakeSource, **kw: object
+) -> tuple[RealPipeline, FakeTranscriber, FakeSeparator, FakeStereo]:
+    transcriber, separator, stereo = FakeTranscriber(), FakeSeparator(), FakeStereo()
     pipe = RealPipeline(
         source=source,
         transcriber=lambda: transcriber,
         separator=lambda: separator,
         beat_tracker=lambda: FakeBeats(),
+        stereo=lambda: stereo,
         **kw,  # type: ignore[arg-type]
     )
-    return pipe, transcriber, separator
+    return pipe, transcriber, separator, stereo
 
 
 def test_guitar_stem_skips_separation_and_builds_score(tmp_path: Path) -> None:
@@ -77,12 +95,13 @@ def test_guitar_stem_skips_separation_and_builds_score(tmp_path: Path) -> None:
         write_tone(dst, 2.0)
         expected_sha.append(hashlib.sha256(dst.read_bytes()).hexdigest())
 
-    pipe, transcriber, separator = _pipeline(FakeSource(make))
+    pipe, transcriber, separator, stereo = _pipeline_with_stereo(FakeSource(make))
     seen: list[Stage] = []
     result = pipe.process(_job("guitar_stem"), seen.append)
 
     assert seen == [Stage.NORMALIZING, Stage.TRANSCRIBING, Stage.ARRANGING]
     assert separator.inputs == []
+    assert stereo.inputs == []  # one guitar: no Lead/Rhythm split
     assert transcriber.inputs and transcriber.inputs[0].name == "audio.wav"
     assert result.duration_ms == pytest.approx(2000, abs=20)
     assert result.sha256 == expected_sha[0]
@@ -104,6 +123,27 @@ def test_mix_separates_before_transcribing(tmp_path: Path) -> None:
     assert Stage.SEPARATING in seen
     assert separator.inputs[0].name == "audio.wav"
     assert transcriber.inputs[0].name == "guitar.wav"
+
+
+def test_mix_builds_lead_and_rhythm_tracks_from_the_guitar_stem(tmp_path: Path) -> None:
+    pipe, _, _, stereo = _pipeline_with_stereo(FakeSource(lambda dst: write_tone(dst, 1.0)))
+    result = pipe.process(_job("mix"), lambda _: None)
+
+    assert [p.name for p in stereo.inputs] == ["guitar.wav"]
+    score = Score.model_validate(result.score)
+    assert score.schema_version == 3
+    assert "bars" not in result.score and "tuning" not in result.score
+    tracks = score.track_list()
+    assert [t.name for t in tracks] == ["Lead", "Rhythm"]
+    assert len(tracks[0].bars) == len(tracks[1].bars)
+    lead = [
+        tracks[0].tuning[n.string - 1] + n.fret
+        for b in tracks[0].bars
+        for beat in b.beats
+        for n in beat.notes
+    ]
+    # E4 and A4 single notes, no stereo info: the high register puts both in Lead.
+    assert lead == [64, 69]
 
 
 def test_too_long_audio_fails_before_transcription(tmp_path: Path) -> None:

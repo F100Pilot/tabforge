@@ -1,5 +1,6 @@
 """Interfaces for third-party pipeline stages (ADR-0002). Implementations land in M1/M2."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -33,3 +34,9 @@ class Transcriber(Protocol):
 
 class BeatTracker(Protocol):
     def beats(self, audio: Path) -> list[float]: ...
+
+
+class StereoAnalyzer(Protocol):
+    """Side-channel energy share of each note (ADR-0010); None when the audio is not stereo."""
+
+    def side_ratios(self, audio: Path, notes: Sequence[NoteEvent]) -> list[float] | None: ...

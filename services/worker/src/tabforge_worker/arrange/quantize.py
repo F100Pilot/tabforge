@@ -72,14 +72,25 @@ def _snap_error(fracs: list[float], divisions: int) -> float:
     return sum(abs(f - round(f * divisions) / divisions) for f in fracs)
 
 
-def quantize(notes: Sequence[NoteEvent], beats: Sequence[float]) -> Quantized:
-    """Place notes on the tick grid. `beats` are beat times in seconds (any order)."""
-    if not notes:
+def quantize(
+    notes: Sequence[NoteEvent],
+    beats: Sequence[float],
+    span: tuple[float, float] | None = None,
+) -> Quantized:
+    """Place notes on the tick grid. `beats` are beat times in seconds (any order).
+
+    `span` (first onset, last offset) fixes where bar 1 starts and how far the grid goes, so
+    that several tracks cut from the same notes (Lead/Rhythm, ADR-0010) share one grid; by
+    default it is the span of `notes`.
+    """
+    if not notes and span is None:
         return Quantized((), frozenset(), TICKS_PER_BAR, _tempo(DEFAULT_BEAT_S))
 
-    first = min(n.onset_s for n in notes)
-    last = max(n.offset_s for n in notes)
+    first = min([n.onset_s for n in notes] + ([span[0]] if span else []))
+    last = max([n.offset_s for n in notes] + ([span[1]] if span else []))
     grid = _Grid(beats, first, last)
+    if not notes:
+        return Quantized((), frozenset(), TICKS_PER_BAR, _tempo(grid.period))
 
     by_beat: dict[int, list[float]] = {}
     for n in notes:

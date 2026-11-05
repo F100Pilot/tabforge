@@ -1,5 +1,8 @@
 """The real transcription pipeline: S3 audio -> ffmpeg -> (Demucs) -> Basic Pitch + beats -> Score.
 
+An isolated guitar stem gives a Score v2 (one guitar). A band mix gives a Score v3 with the
+tracks "Lead" and "Rhythm", split from the notes of the Demucs guitar stem (ADR-0010).
+
 Models are created lazily, once per worker process, through the factories (Demucs and Basic
 Pitch take seconds to load). Temporary files live in one directory per job, removed at the end.
 """
@@ -10,9 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
-from tabforge_worker.arrange.fretting import assign_positions
-from tabforge_worker.arrange.layout import build_score
-from tabforge_worker.arrange.quantize import quantize
+from tabforge_worker.arrange.tracks import arrange_guitar, arrange_lead_rhythm
 from tabforge_worker.media import MediaError, normalize_to_wav, probe_duration_s
 from tabforge_worker.pipeline import (
     PipelineError,
@@ -21,7 +22,7 @@ from tabforge_worker.pipeline import (
     StageCallback,
     plan_stages,
 )
-from tabforge_worker.ports import BeatTracker, Separator, Transcriber
+from tabforge_worker.ports import BeatTracker, Separator, StereoAnalyzer, Transcriber
 from tabforge_worker.queue import ClaimedJob
 
 MAX_DURATION_S = 600.0  # US-01: 10 minutes
@@ -58,6 +59,7 @@ class RealPipeline:
         transcriber: Callable[[], Transcriber],
         separator: Callable[[], Separator],
         beat_tracker: Callable[[], BeatTracker],
+        stereo: Callable[[], StereoAnalyzer],
         max_duration_s: float = MAX_DURATION_S,
         tuning: tuple[int, ...] = STANDARD_TUNING,
     ) -> None:
@@ -65,6 +67,7 @@ class RealPipeline:
         self._transcriber = _Lazy(transcriber)
         self._separator = _Lazy(separator)
         self._beats = _Lazy(beat_tracker)
+        self._stereo = _Lazy(stereo)
         self._max_duration_s = max_duration_s
         self._tuning = tuning
 
@@ -97,9 +100,9 @@ class RealPipeline:
             beats = self._beats.get().beats(audio)
 
             on_stage(Stage.ARRANGING)
-            quantized = quantize(notes, beats)
-            fretted = assign_positions(
-                [(e.pitches, e.velocities) for e in quantized.events], self._tuning
-            )
-            score = build_score(quantized, fretted, self._tuning)
+            if job.source_kind == "mix":
+                ratios = self._stereo.get().side_ratios(guitar, notes)
+                score = arrange_lead_rhythm(notes, beats, ratios, self._tuning)
+            else:
+                score = arrange_guitar(notes, beats, self._tuning)
         return PipelineResult(score.model_dump(mode="json"), round(duration * 1000), sha)

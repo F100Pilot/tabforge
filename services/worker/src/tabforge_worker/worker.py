@@ -107,6 +107,7 @@ def build_pipeline(kind: Literal["stub", "real"], source: AudioStore | None = No
     from tabforge_worker.adapters.demucs import DemucsGuitarSeparator
     from tabforge_worker.adapters.librosa_beats import LibrosaBeatTracker
     from tabforge_worker.adapters.s3_source import S3AudioSource
+    from tabforge_worker.adapters.stereo import StereoSideAnalyzer
     from tabforge_worker.real_pipeline import RealPipeline
 
     return RealPipeline(
@@ -114,6 +115,7 @@ def build_pipeline(kind: Literal["stub", "real"], source: AudioStore | None = No
         transcriber=BasicPitchOnnxTranscriber,
         separator=DemucsGuitarSeparator,
         beat_tracker=LibrosaBeatTracker,
+        stereo=StereoSideAnalyzer,
     )
 
 
