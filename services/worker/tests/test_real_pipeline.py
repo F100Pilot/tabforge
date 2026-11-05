@@ -4,12 +4,14 @@ import hashlib
 import shutil
 import uuid
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from tabforge_score import Score
 from test_media import write_tone
 
+from tabforge_worker.arrange.fretting import Weights
 from tabforge_worker.pipeline import PipelineError, Stage
 from tabforge_worker.ports import NoteEvent
 from tabforge_worker.queue import ClaimedJob
@@ -176,3 +178,25 @@ def test_temporary_files_are_removed(tmp_path: Path) -> None:
     pipe, _, _ = _pipeline(FakeSource(make))
     pipe.process(_job("guitar_stem"), lambda _: None)
     assert not dirs[0].exists()
+
+
+def _positions(score: Score) -> list[tuple[int, int]]:
+    return [
+        (n.string, n.fret)
+        for t in score.track_list()
+        for b in t.bars
+        for beat in b.beats
+        for n in beat.notes
+    ]
+
+
+@pytest.mark.parametrize("kind", ["guitar_stem", "mix"])
+def test_the_owners_tuned_weights_choose_the_positions(kind: str) -> None:
+    """ADR-0011: a job carrying the owner's weights arranges with them (v2 and v3 alike)."""
+    pipe, _, _ = _pipeline(FakeSource(lambda dst: write_tone(dst, 1.0)))
+    default = Score.model_validate(pipe.process(_job(kind), lambda _: None).score)
+    high = Weights(span=1.0, height=-0.4, move=0.1, open_move=0.0)
+    tuned_job = replace(_job(kind), weights=high)
+    tuned = Score.model_validate(pipe.process(tuned_job, lambda _: None).score)
+    assert _positions(default) != _positions(tuned)
+    assert max(f for _, f in _positions(tuned)) > max(f for _, f in _positions(default))

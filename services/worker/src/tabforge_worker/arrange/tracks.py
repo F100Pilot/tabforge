@@ -11,7 +11,7 @@ from dataclasses import replace
 
 from tabforge_score import Score
 
-from tabforge_worker.arrange.fretting import Fretted, assign_positions
+from tabforge_worker.arrange.fretting import DEFAULT_WEIGHTS, Fretted, Weights, assign_positions
 from tabforge_worker.arrange.layout import build_score, build_tracks_score
 from tabforge_worker.arrange.quantize import Quantized, quantize
 from tabforge_worker.arrange.split import assign_roles, note_features, split_notes
@@ -21,16 +21,19 @@ LEAD_TRACK = "Lead"
 RHYTHM_TRACK = "Rhythm"
 
 
-def _fret(quantized: Quantized, tuning: Sequence[int]) -> list[Fretted]:
-    return assign_positions([(e.pitches, e.velocities) for e in quantized.events], tuning)
+def _fret(quantized: Quantized, tuning: Sequence[int], weights: Weights) -> list[Fretted]:
+    return assign_positions([(e.pitches, e.velocities) for e in quantized.events], tuning, weights)
 
 
 def arrange_guitar(
-    notes: Sequence[NoteEvent], beats: Sequence[float], tuning: Sequence[int]
+    notes: Sequence[NoteEvent],
+    beats: Sequence[float],
+    tuning: Sequence[int],
+    weights: Weights = DEFAULT_WEIGHTS,
 ) -> Score:
-    """One guitar (isolated stem): Score v2."""
+    """One guitar (isolated stem): Score v2. `weights`: the owner's tuned ones (ADR-0011)."""
     quantized = quantize(notes, beats)
-    return build_score(quantized, _fret(quantized, tuning), tuning)
+    return build_score(quantized, _fret(quantized, tuning, weights), tuning)
 
 
 def arrange_lead_rhythm(
@@ -38,6 +41,7 @@ def arrange_lead_rhythm(
     beats: Sequence[float],
     side_ratios: Sequence[float] | None,
     tuning: Sequence[int],
+    weights: Weights = DEFAULT_WEIGHTS,
 ) -> Score:
     """Guitar stem of a band mix: Score v3 with tracks "Lead" and "Rhythm" (see arrange.split)."""
     roles = assign_roles(notes, note_features(notes, side_ratios), beats)
@@ -49,4 +53,4 @@ def arrange_lead_rhythm(
     ]
     total = max(q.total_ticks for _, q in parts)
     padded = [(name, replace(q, total_ticks=total)) for name, q in parts]
-    return build_tracks_score([(name, q, _fret(q, tuning)) for name, q in padded], tuning)
+    return build_tracks_score([(name, q, _fret(q, tuning, weights)) for name, q in padded], tuning)

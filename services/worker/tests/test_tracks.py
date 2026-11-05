@@ -3,6 +3,7 @@
 import pytest
 from tabforge_score import Score, to_alphatex
 
+from tabforge_worker.arrange.fretting import Weights
 from tabforge_worker.arrange.layout import build_tracks_score
 from tabforge_worker.arrange.quantize import TICKS_PER_BAR, quantize
 from tabforge_worker.arrange.tracks import arrange_guitar, arrange_lead_rhythm
@@ -102,3 +103,29 @@ def test_build_tracks_score_rejects_mismatched_tracks() -> None:
         build_tracks_score([("Lead", a, []), ("Rhythm", b, [])], STANDARD)
     with pytest.raises(ValueError):
         build_tracks_score([], STANDARD)
+
+
+# The owner's tuned weights (ADR-0011) --------------------------------------------------------
+
+HIGH = Weights(span=1.0, height=-0.4, move=0.1, open_move=0.0)  # rewards high frets
+
+
+def _frets(score: Score, track: int) -> list[int]:
+    return [n.fret for bar in score.track_list()[track].bars for b in bar.beats for n in b.notes]
+
+
+def test_guitar_uses_the_weights_it_is_given() -> None:
+    notes = [_n(0.0, 64), _n(0.5, 67), _n(1.0, 69)]
+    default = arrange_guitar(notes, BEATS, STANDARD)
+    high = arrange_guitar(notes, BEATS, STANDARD, HIGH)
+    assert _attacks(high, 0) == _attacks(default, 0) == [64, 67, 69]
+    assert min(_frets(high, 0)) > max(_frets(default, 0))
+
+
+def test_lead_and_rhythm_use_the_weights_they_are_given() -> None:
+    melody = [_n(0.5 * k, p, 0.5) for k, p in enumerate((64, 67, 69, 67))]
+    default = arrange_lead_rhythm(melody, BEATS, None, STANDARD)
+    high = arrange_lead_rhythm(melody, BEATS, None, STANDARD, HIGH)
+    for track in (0, 1):
+        assert _attacks(high, track) == _attacks(default, track)
+    assert sum(_frets(high, 0) + _frets(high, 1)) > sum(_frets(default, 0) + _frets(default, 1))

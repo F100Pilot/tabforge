@@ -10,14 +10,15 @@ import os
 import signal
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import FrameType
 from typing import Any, Literal, Protocol
 
 import psycopg
 
-from tabforge_worker import queue, retention
+from tabforge_worker import profiles, queue, retention
+from tabforge_worker.arrange.fretting import Weights
 from tabforge_worker.pipeline import Pipeline, PipelineError, Stage, StubPipeline
 
 log = logging.getLogger("tabforge_worker")
@@ -31,6 +32,8 @@ class WorkerConfig:
     max_attempts: int = 3
     pipeline: Literal["stub", "real"] = "stub"
     retention_interval_s: float = 3600.0
+    # How often stale fretting profiles are looked for and refreshed (ADR-0011).
+    tuning_interval_s: float = 30.0
     # Desktop (ADR-0008): read and delete audio in the API's local storage folder, not S3.
     storage_backend: Literal["s3", "local"] = "s3"
     local_storage_dir: Path | None = None
@@ -55,6 +58,7 @@ class WorkerConfig:
             max_attempts=int(os.environ.get("TABFORGE_WORKER_MAX_ATTEMPTS", "3")),
             pipeline=_pipeline_kind(os.environ.get("TABFORGE_WORKER_PIPELINE", "stub")),
             retention_interval_s=float(os.environ.get("TABFORGE_WORKER_RETENTION_S", "3600")),
+            tuning_interval_s=float(os.environ.get("TABFORGE_WORKER_TUNING_S", "30")),
             storage_backend=backend,
             local_storage_dir=local_dir,
         )
@@ -124,6 +128,7 @@ def run_once(conn: psycopg.Connection[Any], config: WorkerConfig, pipeline: Pipe
     job = queue.claim_next(conn, config.lease_s, config.max_attempts)
     if job is None:
         return False
+    job = replace(job, weights=_owner_weights(conn, job))
     current: list[Stage] = []
 
     def on_stage(stage: Stage) -> None:
@@ -146,13 +151,72 @@ def run_once(conn: psycopg.Connection[Any], config: WorkerConfig, pipeline: Pipe
     if tab_id is None:
         log.info(_event("job_gone", job=job.id))  # owner deleted their account mid-job
         return True
-    log.info(_event("job_done", job=job.id, tab=tab_id))
+    fretting = "default" if job.weights is None else "profile"
+    log.info(_event("job_done", job=job.id, tab=tab_id, fretting=fretting))
     return True
+
+
+def _owner_weights(conn: psycopg.Connection[Any], job: queue.ClaimedJob) -> Weights | None:
+    """The owner's tuned string/fret weights; the default ones if the profile cannot be read."""
+    try:
+        return profiles.accepted_weights(conn, job.owner_id)
+    except psycopg.OperationalError:
+        raise
+    except psycopg.Error:
+        log.exception(_event("fretting_profile_unreadable", job=job.id))
+        return None
+
+
+PROFILES_PER_RUN = 3  # a few seconds each; then back to the jobs, the rest wait for the next run
+
+
+def refresh_profiles(conn: psycopg.Connection[Any], limit: int = PROFILES_PER_RUN) -> int:
+    """Tune up to `limit` stale fretting profiles (ADR-0011); returns how many were refreshed."""
+    done = 0
+    while done < limit:
+        try:
+            refreshed = profiles.refresh_next(conn)
+        except profiles.TuningError as exc:
+            log.exception(_event("fretting_profile_failed", user=exc.user_id))
+            profiles.postpone(conn, exc.user_id)
+            break
+        if refreshed is None:
+            break
+        result = refreshed.result
+        log.info(
+            _event(
+                "fretting_profile_updated",
+                user=refreshed.user_id,
+                status=refreshed.status,
+                tabs=result.tabs,
+                notes=result.notes,
+                default_accuracy=_rounded(result.default_accuracy),
+                tuned_accuracy=_rounded(result.tuned_accuracy),
+                accepted=result.weights is not None,
+                seconds=round(refreshed.seconds, 2),
+            )
+        )
+        done += 1
+    return done
+
+
+def _rounded(value: float | None) -> float | None:
+    return None if value is None else round(value, 4)
 
 
 def _event(name: str, **fields: object) -> str:
     """One JSON object per log line; ids only, never user data."""
     return json.dumps({"event": name, **{k: str(v) for k, v in fields.items()}})
+
+
+def _refresh_profiles_safely(conn: psycopg.Connection[Any]) -> None:
+    """Learning must never stop the worker: only a lost connection goes up to reconnect."""
+    try:
+        refresh_profiles(conn)
+    except psycopg.OperationalError:
+        raise
+    except Exception:
+        log.exception(_event("fretting_refresh_failed"))
 
 
 class StopFlag(Protocol):
@@ -187,14 +251,15 @@ def run_forever(
     pipeline: Pipeline | None = None,
     store: AudioStore | None = None,
 ) -> None:
-    """Claim jobs and purge retention until `stop` is set; reconnects if Postgres drops.
+    """Claim jobs, refresh fretting profiles and purge retention until `stop` is set; reconnects
+    if Postgres drops.
 
     Safe to run in a thread: no signal handling and no logging setup here (see `main`). A job in
     progress finishes before the loop checks `stop` again.
     """
     store = store or build_store(config)
     pipeline = pipeline or build_pipeline(config.pipeline, store)
-    next_purge = 0.0
+    next_purge = next_tuning = 0.0
     log.info(
         _event(
             "worker_started",
@@ -212,6 +277,9 @@ def run_forever(
                         auth_purged = retention.purge_auth(conn)
                         log.info(_event("retention_run", purged=purged, auth_purged=auth_purged))
                         next_purge = time.monotonic() + config.retention_interval_s
+                    if time.monotonic() >= next_tuning:
+                        _refresh_profiles_safely(conn)
+                        next_tuning = time.monotonic() + config.tuning_interval_s
                     if not run_once(conn, config, pipeline):
                         stop.wait(config.poll_interval_s)
         except psycopg.OperationalError:

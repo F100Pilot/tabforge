@@ -15,7 +15,7 @@ from tabforge_worker.adapters.s3_source import S3AudioSource
 from tabforge_worker.pipeline import StubPipeline
 from tabforge_worker.worker import WorkerConfig, build_store, run_forever
 
-ENV_KEYS = ("TABFORGE_STORAGE_BACKEND", "TABFORGE_LOCAL_STORAGE_DIR")
+ENV_KEYS = ("TABFORGE_STORAGE_BACKEND", "TABFORGE_LOCAL_STORAGE_DIR", "TABFORGE_WORKER_TUNING_S")
 
 
 @pytest.fixture
@@ -111,3 +111,9 @@ def test_run_forever_in_a_thread_processes_jobs_purges_local_files_and_stops(
         "SELECT status FROM audio_assets WHERE storage_key = %s", (key,)
     ).fetchone()
     assert status == ("expired",)
+
+
+def test_fretting_profiles_are_checked_every_30_s_by_default(env: pytest.MonkeyPatch) -> None:
+    assert WorkerConfig.from_env().tuning_interval_s == 30.0
+    env.setenv("TABFORGE_WORKER_TUNING_S", "5")
+    assert WorkerConfig.from_env().tuning_interval_s == 5.0

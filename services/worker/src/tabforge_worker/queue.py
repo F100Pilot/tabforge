@@ -12,6 +12,8 @@ from typing import Any
 
 import psycopg
 
+from tabforge_worker.arrange.fretting import Weights
+
 MAX_ATTEMPTS_ERROR = "max_attempts_exceeded"
 
 _CLAIM = """
@@ -43,6 +45,8 @@ class ClaimedJob:
     owner_id: uuid.UUID
     storage_key: str
     content_type: str
+    # The owner's tuned string/fret weights (ADR-0011), set by the worker loop; None = default.
+    weights: Weights | None = None
 
 
 def claim_next(conn: psycopg.Connection[Any], lease_s: int, max_attempts: int) -> ClaimedJob | None:

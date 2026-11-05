@@ -13,6 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
+from tabforge_worker.arrange.fretting import DEFAULT_WEIGHTS
 from tabforge_worker.arrange.tracks import arrange_guitar, arrange_lead_rhythm
 from tabforge_worker.media import MediaError, normalize_to_wav, probe_duration_s
 from tabforge_worker.pipeline import (
@@ -100,9 +101,10 @@ class RealPipeline:
             beats = self._beats.get().beats(audio)
 
             on_stage(Stage.ARRANGING)
+            weights = job.weights or DEFAULT_WEIGHTS  # the owner's tuned weights (ADR-0011)
             if job.source_kind == "mix":
                 ratios = self._stereo.get().side_ratios(guitar, notes)
-                score = arrange_lead_rhythm(notes, beats, ratios, self._tuning)
+                score = arrange_lead_rhythm(notes, beats, ratios, self._tuning, weights)
             else:
-                score = arrange_guitar(notes, beats, self._tuning)
+                score = arrange_guitar(notes, beats, self._tuning, weights)
         return PipelineResult(score.model_dump(mode="json"), round(duration * 1000), sha)

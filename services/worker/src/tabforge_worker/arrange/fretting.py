@@ -108,46 +108,98 @@ def _center(shape: Shape) -> float | None:
     return fmean(fretted) if fretted else None
 
 
-def _shape_cost(shape: Shape, w: Weights) -> float:
-    fretted = [p.fret for p in shape if p.fret > 0]
-    if not fretted:
-        return 0.0
-    return w.span * (max(fretted) - min(fretted)) + w.height * fmean(fretted)
+Moves = tuple[tuple[float, ...], tuple[float, ...]]
 
 
-def _move_cost(a: Shape, b: Shape, w: Weights) -> float:
-    ca, cb = _center(a), _center(b)
-    if ca is not None and cb is not None:
-        return w.move * abs(ca - cb)
-    return w.open_move * abs((ca or 0.0) - (cb or 0.0))
+@dataclass(frozen=True, slots=True)
+class PreparedEvents:
+    """The playable shapes of every event and their costs' terms, computed once for any number
+    of `Weights` (the weight search in `learning` reruns the Viterbi hundreds of times).
+
+    `spreads[i][k]`/`centers[i][k]`: fret span and mean fret of the fretted notes of
+    `shapes[i][k]` (center None for an all-open or empty shape). `moves[i][k]` (i >= 1): the
+    center change from each shape of event i - 1, split in two tuples: changes between fretted
+    shapes (0 where a shape is all open) and changes to or from an all-open shape (0 elsewhere).
+    """
+
+    pitches: tuple[tuple[int, ...], ...]
+    shapes: tuple[tuple[Shape, ...], ...]
+    dropped: tuple[tuple[tuple[int, str], ...], ...]
+    spreads: tuple[tuple[int, ...], ...]
+    centers: tuple[tuple[float | None, ...], ...]
+    moves: tuple[tuple[Moves, ...], ...]
 
 
-def assign_positions(
-    events: Sequence[tuple[Sequence[int], Sequence[int]]],
-    tuning: Sequence[int],
-    weights: Weights = DEFAULT_WEIGHTS,
-) -> list[Fretted]:
-    """Choose a (string, fret) for every note. `events` = (pitches, velocities) per event."""
-    if not events:
-        return []
+def _moves(previous: Sequence[float | None], current: Sequence[float | None]) -> tuple[Moves, ...]:
+    out = []
+    for cb in current:
+        fretted, open_ = [], []
+        for ca in previous:
+            if ca is not None and cb is not None:
+                fretted.append(abs(ca - cb))
+                open_.append(0.0)
+            else:
+                fretted.append(0.0)
+                open_.append(abs((ca or 0.0) - (cb or 0.0)))
+        out.append((tuple(fretted), tuple(open_)))
+    return tuple(out)
+
+
+def prepare_events(
+    events: Sequence[tuple[Sequence[int], Sequence[int]]], tuning: Sequence[int]
+) -> PreparedEvents:
+    """Drop unplayable notes and list the shapes of each event (see `assign_positions`)."""
     prepared = [_playable(p, v, tuning) for p, v in events]
-
-    costs = [_shape_cost(s, weights) for s in prepared[0][1]]
-    back: list[list[int]] = []
-    for i in range(1, len(prepared)):
-        prev_shapes, shapes = prepared[i - 1][1], prepared[i][1]
-        new_costs, pointers = [], []
+    spreads: list[tuple[int, ...]] = []
+    centers: list[tuple[float | None, ...]] = []
+    for _, shapes, _ in prepared:
+        spread_row: list[int] = []
         for shape in shapes:
-            best = min(
-                range(len(prev_shapes)),
-                key=lambda j: costs[j] + _move_cost(prev_shapes[j], shape, weights),
-            )
+            fretted = [p.fret for p in shape if p.fret > 0]
+            spread_row.append(max(fretted) - min(fretted) if fretted else 0)
+        spreads.append(tuple(spread_row))
+        centers.append(tuple(_center(shape) for shape in shapes))
+    moves = [()] + [_moves(centers[i - 1], centers[i]) for i in range(1, len(centers))]
+    return PreparedEvents(
+        pitches=tuple(tuple(kept) for kept, _, _ in prepared),
+        shapes=tuple(tuple(shapes) for _, shapes, _ in prepared),
+        dropped=tuple(tuple(dropped) for _, _, dropped in prepared),
+        spreads=tuple(spreads),
+        centers=tuple(centers),
+        moves=tuple(moves),
+    )
+
+
+def best_path(prepared: PreparedEvents, weights: Weights = DEFAULT_WEIGHTS) -> list[int]:
+    """Viterbi: the index of the chosen shape of every event (cheapest path, first on ties).
+
+    Hand-shape cost: span * fret spread + height * mean fret (0 for an all-open shape).
+    Move cost: move * |center change|, or open_move * |change| when either shape is all open.
+    """
+    if not prepared.shapes:
+        return []
+    w_span, w_height, w_move, w_open = weights.span, weights.height, weights.move, weights.open_move
+
+    costs = [
+        0.0 if center is None else w_span * spread + w_height * center
+        for spread, center in zip(prepared.spreads[0], prepared.centers[0], strict=True)
+    ]
+    back: list[list[int]] = []
+    for i in range(1, len(prepared.shapes)):
+        new_costs: list[float] = []
+        pointers: list[int] = []
+        for (fretted, open_), spread, center in zip(
+            prepared.moves[i], prepared.spreads[i], prepared.centers[i], strict=True
+        ):
+            # One of the two terms is always 0, so this is exactly cost + one move cost.
+            totals = [
+                c + (w_move * f + w_open * o) for c, f, o in zip(costs, fretted, open_, strict=True)
+            ]
+            best_total = min(totals)
+            pointers.append(totals.index(best_total))
             new_costs.append(
-                costs[best]
-                + _move_cost(prev_shapes[best], shape, weights)
-                + _shape_cost(shape, weights)
+                best_total + (0.0 if center is None else w_span * spread + w_height * center)
             )
-            pointers.append(best)
         costs = new_costs
         back.append(pointers)
 
@@ -157,8 +209,23 @@ def assign_positions(
         choice = pointers[choice]
         chosen.append(choice)
     chosen.reverse()
+    return chosen
 
+
+def assign_positions(
+    events: Sequence[tuple[Sequence[int], Sequence[int]]],
+    tuning: Sequence[int],
+    weights: Weights = DEFAULT_WEIGHTS,
+) -> list[Fretted]:
+    """Choose a (string, fret) for every note. `events` = (pitches, velocities) per event."""
+    prepared = prepare_events(events, tuning)
     return [
-        Fretted(tuple(kept), shapes[k], tuple(dropped))
-        for (kept, shapes, dropped), k in zip(prepared, chosen, strict=True)
+        Fretted(kept, shapes[k], dropped)
+        for kept, shapes, dropped, k in zip(
+            prepared.pitches,
+            prepared.shapes,
+            prepared.dropped,
+            best_path(prepared, weights),
+            strict=True,
+        )
     ]
