@@ -57,7 +57,9 @@ if errorlevel 1 echo Aviso: git pull falhou; continua com a versao local.
 :deps
 cd apps\desktop
 echo == A instalar dependencias ^(a primeira vez demora^)
-uv sync --frozen --extra bundle
+rem Our own packages are reinstalled from the checkout on every start: uv only rebuilds a
+rem path package when its pyproject.toml changes, so a git pull would keep the old code.
+uv sync --frozen --extra bundle --reinstall-package tabforge-api --reinstall-package tabforge-worker --reinstall-package tabforge-score
 if errorlevel 1 goto :fail
 
 uv run --frozen --no-sync python packaging\dev_start.py %ARGS%
