@@ -12,6 +12,7 @@ from tabforge_score import Score, to_alphatex
 from tabforge_api.deps import CurrentUser, SessionDep, limit_writes
 from tabforge_api.models import Tab, TabRevision
 from tabforge_api.problems import ProblemError
+from tabforge_api.routes.tuning import mark_stale
 
 router = APIRouter(prefix="/v1/tabs", tags=["tabs"])
 
@@ -167,6 +168,7 @@ def create_revision(
     tab.current_revision_id = revision.id
     session.flush()
     session.refresh(revision)
+    mark_stale(session, user.id)  # an edited tab is training data (ADR-0011)
     return _tab_out(tab, revision)
 
 

@@ -8,6 +8,7 @@ from sqlalchemy import (
     BigInteger,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -34,6 +35,7 @@ JOB_STATUSES = ("queued", "running", "done", "failed")
 JOB_STAGES = ("normalizing", "separating", "transcribing", "arranging")
 TAB_VISIBILITIES = ("private", "unlisted", "public")
 REVISION_SOURCES = ("ai", "user")
+PROFILE_STATUSES = ("stale", "ready", "insufficient")
 
 
 def _in(column: str, values: tuple[str, ...]) -> str:
@@ -180,6 +182,31 @@ class TabReference(Base):
         UniqueConstraint("tab_id", "track_index", name="uq_tab_references_tab_id_track_index"),
         CheckConstraint("track_index >= 0", name="track_index_non_negative"),
     )
+
+
+class FrettingProfile(Base):
+    """String/fret weights learnt from the user's correct tabs (ADR-0011); one per user.
+
+    The API marks it `stale` (with `requested_at`) when the training data changes; the worker
+    refreshes it to `ready` (tuned, `weights` set only if they beat the default) or
+    `insufficient` (too few notes or tabs).
+    """
+
+    __tablename__ = "fretting_profiles"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    weights: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    default_accuracy: Mapped[float | None] = mapped_column(Float)
+    tuned_accuracy: Mapped[float | None] = mapped_column(Float)
+    tabs: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    notes: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="stale")
+    requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (CheckConstraint(_in("status", PROFILE_STATUSES), name="status"),)
 
 
 class Job(Base):

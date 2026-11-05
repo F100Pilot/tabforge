@@ -9,7 +9,16 @@ from tabforge_api.limits import SlidingWindowLimiter
 from tabforge_api.local_storage import LocalObjectStore
 from tabforge_api.mailer import Mailer, build_mailer
 from tabforge_api.problems import ProblemError, install_problem_handlers
-from tabforge_api.routes import auth, jobs, local_storage, me, references, tabs, uploads
+from tabforge_api.routes import (
+    auth,
+    jobs,
+    local_storage,
+    me,
+    references,
+    tabs,
+    tuning,
+    uploads,
+)
 from tabforge_api.settings import LOOPBACK_HOSTS, Settings
 from tabforge_api.storage import ObjectStore, S3ObjectStore
 
@@ -78,6 +87,7 @@ def create_app(
 
     app.include_router(auth.router)
     app.include_router(me.router)
+    app.include_router(tuning.router)
     app.include_router(uploads.router)
     app.include_router(jobs.router)
     app.include_router(tabs.router)

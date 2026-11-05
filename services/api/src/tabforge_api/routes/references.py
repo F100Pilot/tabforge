@@ -18,6 +18,7 @@ from tabforge_api.deps import CurrentUser, SessionDep, limit_writes
 from tabforge_api.models import Tab, TabReference, TabRevision
 from tabforge_api.problems import ProblemError
 from tabforge_api.routes.tabs import TabOut, _tab_out, enforce_body_limit, owned_tab
+from tabforge_api.routes.tuning import mark_stale
 
 router = APIRouter(prefix="/v1/tabs", tags=["reference"])
 
@@ -179,6 +180,7 @@ def put_reference(
     session.add(reference)
     session.flush()
     session.refresh(reference)
+    mark_stale(session, user.id)  # training data for the string/fret choice (ADR-0011)
     return _out(reference)
 
 
@@ -198,9 +200,13 @@ def delete_reference(
     tab_id: uuid.UUID, user: CurrentUser, session: SessionDep, track: TrackQuery = 0
 ) -> Response:
     tab = owned_tab(session, user, tab_id)
-    session.execute(
-        delete(TabReference).where(TabReference.tab_id == tab.id, TabReference.track_index == track)
-    )
+    removed = session.execute(
+        delete(TabReference)
+        .where(TabReference.tab_id == tab.id, TabReference.track_index == track)
+        .returning(TabReference.id)
+    ).first()
+    if removed is not None:
+        mark_stale(session, user.id)  # less training data (ADR-0011)
     return Response(status_code=204)
 
 
@@ -329,4 +335,5 @@ def apply_comparison(
     tab.current_revision_id = created.id
     session.flush()
     session.refresh(created)
+    mark_stale(session, user.id)
     return ApplyOut(tab=_tab_out(tab, created), applied=applied, skipped=skipped)
