@@ -7,6 +7,7 @@ import { SideNavAccount } from "./side-nav-account";
 const LINKS = [
   { href: "/", label: "Nova tablatura", match: (p: string) => p === "/" },
   { href: "/tabs", label: "As minhas tabs", match: (p: string) => p === "/tabs" },
+  { href: "/aprendizagem", label: "Aprendizagem", match: (p: string) => p === "/aprendizagem" },
 ];
 
 export function SideNav() {

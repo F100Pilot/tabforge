@@ -717,3 +717,67 @@ export async function applyCorrections(
     }),
   );
 }
+
+export type TuningStatus = "none" | "stale" | "ready" | "insufficient";
+const TUNING_STATUSES: readonly string[] = ["none", "stale", "ready", "insufficient"];
+export const WEIGHT_KEYS = ["span", "height", "move", "open_move"] as const;
+export type TuningWeights = Record<(typeof WEIGHT_KEYS)[number], number>;
+
+/** ADR-0011: the user's learned fretting profile. */
+export interface Tuning {
+  status: TuningStatus;
+  tabs: number;
+  notes: number;
+  default_accuracy: number | null;
+  tuned_accuracy: number | null;
+  in_use: boolean;
+  weights: TuningWeights | null;
+  updated_at: string | null;
+  min_notes: number;
+  min_tabs: number;
+}
+
+export function parseTuning(v: unknown): Tuning {
+  if (
+    !isRec(v) ||
+    !isStr(v.status) ||
+    !TUNING_STATUSES.includes(v.status) ||
+    !isNum(v.tabs) ||
+    !isNum(v.notes) ||
+    !isNullableNum(v.default_accuracy) ||
+    !isNullableNum(v.tuned_accuracy) ||
+    typeof v.in_use !== "boolean" ||
+    !isNullableStr(v.updated_at) ||
+    !isNum(v.min_notes) ||
+    !isNum(v.min_tabs)
+  ) {
+    throw new ResponseShapeError("aprendizagem");
+  }
+  let weights: TuningWeights | null = null;
+  if (v.weights !== null) {
+    const w = v.weights;
+    if (!isRec(w) || !WEIGHT_KEYS.every((k) => isNum(w[k]))) throw new ResponseShapeError("aprendizagem");
+    weights = { span: w.span as number, height: w.height as number, move: w.move as number, open_move: w.open_move as number };
+  }
+  return {
+    status: v.status as TuningStatus,
+    tabs: v.tabs,
+    notes: v.notes,
+    default_accuracy: v.default_accuracy,
+    tuned_accuracy: v.tuned_accuracy,
+    in_use: v.in_use,
+    weights,
+    updated_at: v.updated_at,
+    min_notes: v.min_notes,
+    min_tabs: v.min_tabs,
+  };
+}
+
+export async function getTuning(signal?: AbortSignal): Promise<Tuning> {
+  return parseTuning(await request("/v1/me/tuning", { signal }));
+}
+
+/** "Atualizar agora": marks the profile stale for the worker (202, same body). */
+export async function requestTuning(): Promise<Tuning> {
+  return parseTuning(await request("/v1/me/tuning", { method: "POST" }));
+}

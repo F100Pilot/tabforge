@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type * as AlphaTab from "@coderline/alphatab";
 import {
@@ -69,6 +70,7 @@ export function TabCompare({
   const [error, setError] = useState<string | null>(null);
   const [applyMessage, setApplyMessage] = useState<string | null>(null);
   const [applyError, setApplyError] = useState<string | null>(null);
+  const [learns, setLearns] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -96,6 +98,7 @@ export function TabCompare({
     setError(null);
     setApplyMessage(null);
     setApplyError(null);
+    setLearns(false);
     setBusy("loading");
     setTabTrack(index);
   }
@@ -165,6 +168,7 @@ export function TabCompare({
       setReference(summary);
       setComparison(cmp);
       setPending(null);
+      setLearns(true);
     } catch (err) {
       setError(referenceProblemMessage(err));
     } finally {
@@ -194,7 +198,10 @@ export function TabCompare({
     try {
       const r = await applyCorrections(tabId, tabTrack, revisionKey, ["position"]);
       setApplyMessage(applyResultMessage(r.applied, r.skipped));
-      if (r.applied > 0) onTabChanged?.(r.tab);
+      if (r.applied > 0) {
+        onTabChanged?.(r.tab);
+        setLearns(true);
+      }
       setComparison(await getComparison(tabId, tabTrack));
     } catch (err) {
       if (isUnauthenticated(err)) setApplyError("A sessão expirou. Entre outra vez.");
@@ -311,6 +318,11 @@ export function TabCompare({
           applyMessage={applyMessage}
           applyError={applyError}
         />
+      )}
+      {learns && (
+        <p className="muted compare-learn">
+          O TabForge vai aprender com esta comparação. <Link href="/aprendizagem">Ver a aprendizagem</Link>
+        </p>
       )}
       <p className="muted compare-limit">Repetições da tab certa não são expandidas.</p>
     </section>

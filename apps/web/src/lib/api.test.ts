@@ -17,6 +17,9 @@ import {
   parseEmptyObject,
   parseSession,
   parseTab,
+  parseTuning,
+  getTuning,
+  requestTuning,
   parseUploadTicket,
   setCsrfToken,
   verifyLogin,
@@ -344,5 +347,49 @@ describe("reference requests", () => {
     vi.stubGlobal("fetch", f);
     await expect(deleteReference("t1")).resolves.toBeUndefined();
     expect(f.mock.calls[0][1].method).toBe("DELETE");
+  });
+});
+
+describe("tuning", () => {
+  const body = {
+    status: "ready",
+    tabs: 3,
+    notes: 400,
+    default_accuracy: 0.62,
+    tuned_accuracy: 0.71,
+    in_use: true,
+    weights: { span: 1, height: 0.5, move: 2, open_move: 0.3 },
+    updated_at: "2026-11-05T10:00:00Z",
+    min_notes: 200,
+    min_tabs: 2,
+  };
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    setCsrfToken(null);
+  });
+
+  it("parses a full body and a body without weights", () => {
+    expect(parseTuning(body).weights?.open_move).toBe(0.3);
+    const none = parseTuning({ ...body, status: "none", weights: null, default_accuracy: null, tuned_accuracy: null, updated_at: null, in_use: false });
+    expect(none.weights).toBeNull();
+  });
+  it("rejects bad shapes", () => {
+    expect(() => parseTuning({ ...body, status: "weird" })).toThrow(ResponseShapeError);
+    expect(() => parseTuning({ ...body, tabs: "3" })).toThrow(ResponseShapeError);
+    expect(() => parseTuning({ ...body, weights: { span: 1 } })).toThrow(ResponseShapeError);
+    expect(() => parseTuning({ ...body, in_use: 1 })).toThrow(ResponseShapeError);
+    expect(() => parseTuning(null)).toThrow(ResponseShapeError);
+  });
+  it("getTuning GETs and requestTuning POSTs with the CSRF token", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://localhost:8000");
+    setCsrfToken("tok");
+    const f = vi.fn().mockImplementation(async () => new Response(JSON.stringify(body), { status: 200 }));
+    vi.stubGlobal("fetch", f);
+    await getTuning();
+    await requestTuning();
+    expect(String(f.mock.calls[0][0])).toBe("http://localhost:8000/v1/me/tuning");
+    expect(f.mock.calls[1][1].method).toBe("POST");
+    expect((f.mock.calls[1][1].headers as Headers).get("X-CSRF-Token")).toBe("tok");
   });
 });
