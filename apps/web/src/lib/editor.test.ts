@@ -12,6 +12,7 @@ import {
   noteBelow,
   noteName,
   parseScore,
+  parseScoreDoc,
   pitchOf,
   playableStrings,
   previousNote,
@@ -287,5 +288,19 @@ describe("parseScore", () => {
     expect(() => parseScore(null)).toThrow();
     expect(() => parseScore({ bars: [] })).toThrow();
     expect(() => parseScore({ ...mk([[[[1, 0]]]]), tuning: [1, 2] })).toThrow();
+  });
+});
+
+describe("parseScoreDoc", () => {
+  const bar = { beats: [{ duration: 4, notes: [{ string: 1, fret: 0 }] }] };
+  const track = (name: string) => ({ name, tuning: TUNING, bars: [bar], warnings: [] });
+  it("accepts v2 and v3", () => {
+    expect(() => parseScoreDoc({ schema_version: 2, tuning: TUNING, bars: [bar] })).not.toThrow();
+    expect(() => parseScoreDoc({ schema_version: 3, tracks: [track("Lead"), track("Rhythm")] })).not.toThrow();
+  });
+  it("rejects an invalid track or an empty list", () => {
+    expect(() => parseScoreDoc({ schema_version: 3, tracks: [] })).toThrow("Partitura inválida.");
+    expect(() => parseScoreDoc({ schema_version: 3, tracks: [track("Lead"), { name: "x", tuning: [1], bars: [] }] })).toThrow();
+    expect(() => parseScoreDoc(null)).toThrow();
   });
 });

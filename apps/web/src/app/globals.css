@@ -1081,7 +1081,8 @@ kbd {
   gap: 0.5rem;
   margin: 0.75rem 0;
 }
-.compare-pick select {
+.compare-pick select,
+.compare-track select {
   min-height: 44px;
   max-width: 100%;
   padding: 0 0.75rem;
@@ -1168,4 +1169,17 @@ kbd {
 
 .bar-empty {
   color: var(--muted);
+}
+
+.track-picker {
+  margin: 0 0 12px;
+  flex-wrap: wrap;
+}
+
+.compare-track {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
 }

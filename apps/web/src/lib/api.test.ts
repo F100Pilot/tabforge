@@ -226,6 +226,20 @@ describe("reference requests", () => {
     expect(await getComparison("t1")).toBeNull();
   });
 
+  it("passes the tab track as ?track=N (omitted for track 0)", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => missing());
+    vi.stubGlobal("fetch", fetchMock);
+    await getReference("t1", 1);
+    await getComparison("t1", 1);
+    await getReference("t1");
+    await deleteReference("t1", 2).catch(() => undefined);
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls[0]).toMatch(/\/v1\/tabs\/t1\/reference\?track=1$/);
+    expect(urls[1]).toMatch(/\/v1\/tabs\/t1\/comparison\?track=1$/);
+    expect(urls[2]).toMatch(/\/v1\/tabs\/t1\/reference$/);
+    expect(urls[3]).toMatch(/\/reference\?track=2$/);
+  });
+
   it("rethrows other 404s", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json(404, { code: "not_found", detail: "x" })));
     await expect(getComparison("t1")).rejects.toBeInstanceOf(ProblemError);

@@ -53,3 +53,22 @@ describe("exportScore", () => {
     expect(() => exportScore(at, "\\tuning (", "x", "gp")).toThrow();
   });
 });
+
+describe("exportScore with two tracks (ADR-0010)", () => {
+  const TEX2 = String.raw`\title "banda" \tempo 100 \ts (4 4)
+\track "Lead" \staff {tabs} \tuning (E4 B3 G3 D3 A2 E2)
+3.1.4 5.1.4 7.1.4 5.1.4 |
+\track "Rhythm" \staff {tabs} \tuning (E4 B3 G3 D3 A2 E2)
+(0.6 2.5 2.4).2 (0.6 2.5 2.4).2 |`;
+
+  it("writes a Guitar Pro file that reads back with both tracks", () => {
+    const file = exportScore(at, TEX2, "Banda", "gp");
+    const back = at.importer.ScoreLoader.loadScoreFromBytes(file.bytes, new at.Settings());
+    expect(back.tracks.map((t) => t.name)).toEqual(["Lead", "Rhythm"]);
+  });
+
+  it("writes a MIDI file with a track per guitar", () => {
+    const file = exportScore(at, TEX2, "Banda", "midi");
+    expect(file.bytes.length).toBeGreaterThan(40);
+  });
+});

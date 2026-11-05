@@ -1,6 +1,7 @@
 import { parsePublicConfig } from "./config";
 import { IS_DESKTOP } from "./desktop";
 import { declaredType, type FileLike } from "./file-checks";
+import { scoreTracks, type ScoreTrack } from "./tracks";
 
 export type SourceKind = "mix" | "guitar_stem";
 export type JobStatus = "queued" | "running" | "done" | "failed";
@@ -45,11 +46,13 @@ export interface ScoreWarning {
   pitch: number;
 }
 
-/** The subset of Score v1/v2 the UI reads. */
+/** The subset of Score v1/v2/v3 the UI reads. `warnings` is the sum over all tracks. */
 export interface ScoreInfo {
   tempo_bpm: number | null;
   time_signature: [number, number] | null;
   warnings: ScoreWarning[];
+  /** One entry for v1/v2 ("Guitarra"), one per track for v3. */
+  tracks: Array<Pick<ScoreTrack, "name" | "tuning" | "warnings">>;
 }
 
 export interface Tab {
@@ -190,16 +193,13 @@ export function readScoreInfo(score: unknown): ScoreInfo {
     ts[1] > 0
       ? ([ts[0], ts[1]] as [number, number])
       : null;
-  const warnings = Array.isArray(r.warnings)
-    ? r.warnings.filter(
-        (w): w is ScoreWarning =>
-          isRec(w) && typeof w.bar === "number" && isStr(w.code) && typeof w.pitch === "number",
-      )
-    : [];
+  const tracks = scoreTracks(score).map(({ name, tuning, warnings }) => ({ name, tuning, warnings }));
+  const warnings = tracks.flatMap((t) => t.warnings);
   return {
     tempo_bpm: typeof r.tempo_bpm === "number" && r.tempo_bpm > 0 ? r.tempo_bpm : null,
     time_signature: timeSig,
     warnings,
+    tracks,
   };
 }
 
@@ -566,14 +566,24 @@ export function parseComparison(v: unknown): Comparison {
 export async function putReference(
   tabId: string,
   body: { filename: string; track: string; notes: ReferenceNoteInput[] },
+  trackIndex = 0,
 ) {
   return parseReferenceSummary(
-    await request(`/v1/tabs/${encodeURIComponent(tabId)}/reference`, {
+    await request(referencePath(tabId, trackIndex), {
       method: "PUT",
       headers: JSON_HEADERS,
       body: JSON.stringify(body),
     }),
   );
+}
+
+/** `?track=N` is the tab's track (ADR-0010); track 0 is the default and keeps the plain URL. */
+function trackQuery(trackIndex: number): string {
+  return trackIndex > 0 ? `?track=${encodeURIComponent(String(trackIndex))}` : "";
+}
+
+function referencePath(tabId: string, trackIndex: number): string {
+  return `/v1/tabs/${encodeURIComponent(tabId)}/reference${trackQuery(trackIndex)}`;
 }
 
 async function nullOnMissingReference<T>(run: () => Promise<T>): Promise<T | null> {
@@ -586,19 +596,19 @@ async function nullOnMissingReference<T>(run: () => Promise<T>): Promise<T | nul
 }
 
 /** The stored reference, or null when the tab has none (404 `reference_not_found`). */
-export function getReference(tabId: string, signal?: AbortSignal): Promise<ReferenceSummary | null> {
+export function getReference(tabId: string, trackIndex = 0, signal?: AbortSignal): Promise<ReferenceSummary | null> {
   return nullOnMissingReference(async () =>
-    parseReferenceSummary(await request(`/v1/tabs/${encodeURIComponent(tabId)}/reference`, { signal })),
+    parseReferenceSummary(await request(referencePath(tabId, trackIndex), { signal })),
   );
 }
 
-export async function deleteReference(tabId: string): Promise<void> {
-  await request(`/v1/tabs/${encodeURIComponent(tabId)}/reference`, { method: "DELETE" });
+export async function deleteReference(tabId: string, trackIndex = 0): Promise<void> {
+  await request(referencePath(tabId, trackIndex), { method: "DELETE" });
 }
 
 /** Comparison of the current revision with the reference, or null when there is no reference. */
-export function getComparison(tabId: string, signal?: AbortSignal): Promise<Comparison | null> {
+export function getComparison(tabId: string, trackIndex = 0, signal?: AbortSignal): Promise<Comparison | null> {
   return nullOnMissingReference(async () =>
-    parseComparison(await request(`/v1/tabs/${encodeURIComponent(tabId)}/comparison`, { signal })),
+    parseComparison(await request(`/v1/tabs/${encodeURIComponent(tabId)}/comparison${trackQuery(trackIndex)}`, { signal })),
   );
 }

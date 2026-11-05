@@ -52,13 +52,29 @@ describe("readScoreInfo", () => {
       tempo_bpm: 96,
       time_signature: [3, 4],
       warnings: [{ bar: 1, code: "x", pitch: 30 }],
+      tracks: [{ name: "Guitarra", tuning: [], warnings: [{ bar: 1, code: "x", pitch: 30 }] }],
     });
+  });
+  it("reads v3: warnings are summed, tuning and name are per track", () => {
+    const w = { bar: 1, code: "x", pitch: 30 };
+    const i = readScoreInfo({
+      schema_version: 3,
+      tempo_bpm: 100,
+      time_signature: [4, 4],
+      tracks: [
+        { name: "Lead", tuning: [64], bars: [], warnings: [w] },
+        { name: "Rhythm", tuning: [62], bars: [], warnings: [w, w] },
+      ],
+    });
+    expect(i.tracks.map((t) => t.name)).toEqual(["Lead", "Rhythm"]);
+    expect(i.warnings).toHaveLength(3);
   });
   it("degrades on v1 / junk", () => {
     expect(readScoreInfo({ tempo_bpm: "x", time_signature: [0, 4] })).toEqual({
       tempo_bpm: null,
       time_signature: null,
       warnings: [],
+      tracks: [{ name: "Guitarra", tuning: [], warnings: [] }],
     });
     expect(readScoreInfo(null).warnings).toEqual([]);
   });

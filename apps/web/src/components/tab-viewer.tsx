@@ -8,9 +8,18 @@ import { SignInPrompt } from "./sign-in-prompt";
 import { TabCompare } from "./tab-compare";
 import { formatClock, formatTuning } from "@/lib/format";
 import { exportScore, saveFile, type ExportFormat } from "@/lib/export";
+import { noteName } from "@/lib/editor";
+import { warningSummary } from "@/lib/tracks";
 import { loadScoreTheme, SCORE_COLORS, saveScoreTheme, type ScoreTheme } from "@/lib/score-theme";
 
 const ASSET_BASE = "/alphatab";
+
+/** Which tracks the score shows: one index, or all of them (ADR-0010). */
+type Shown = number | "all";
+
+function shownIndexes(shown: Shown, count: number): number[] {
+  return shown === "all" ? Array.from({ length: count }, (_, i) => i) : [Math.min(shown, count - 1)];
+}
 
 function resourceColors(theme: ScoreTheme) {
   const { background: _bg, ...rest } = SCORE_COLORS[theme];
@@ -26,6 +35,7 @@ export function TabViewer({ tabId }: { tabId: string }) {
   // Printing always uses the light palette; the chosen theme comes back after the dialog.
   const [printing, setPrinting] = useState(false);
   const printPendingRef = useRef(false);
+  const [shown, setShown] = useState<Shown>("all");
 
   useEffect(() => {
     const done = () => setPrinting(false);
@@ -73,8 +83,14 @@ export function TabViewer({ tabId }: { tabId: string }) {
   return (
     <>
       <TabHeader tab={tab} info={info} theme={theme} onTheme={changeTheme} onPrint={print} />
-      <TabCompare tabId={tab.id} revisionKey={tab.revision.id} />
-      <TabPlayer alphatex={tab.alphatex} theme={printing ? "light" : theme} onRenderFinished={onRenderFinished} />
+      <TabCompare tabId={tab.id} revisionKey={tab.revision.id} trackNames={info.tracks.map((t) => t.name)} />
+      <TabPlayer
+        alphatex={tab.alphatex}
+        trackCount={info.tracks.length}
+        shown={shown}
+        onShown={setShown}
+        trackNames={info.tracks.map((t) => t.name)}
+        theme={printing ? "light" : theme} onRenderFinished={onRenderFinished} />
     </>
   );
 }
@@ -94,13 +110,23 @@ function TabHeader({
 }) {
   const tuning = formatTuning(tab.tuning);
   const omitted = info.warnings.length;
+  const multi = info.tracks.length > 1;
+  const sameTuning = info.tracks.every((t) => t.tuning.join() === info.tracks[0].tuning.join());
+  const perTrack = warningSummary(info.tracks).perTrack;
   return (
     <header className="tab-header">
       <div className="tab-header-row">
         <div>
           <h1>{tab.title}</h1>
           <div className="chips">
-            {tuning && <span className="chip">{tuning}</span>}
+            {tuning && (!multi || sameTuning) && <span className="chip">{tuning}</span>}
+            {multi && !sameTuning &&
+              info.tracks.map((t) => (
+                <span key={t.name} className="chip">
+                  {t.name}: {[...t.tuning].reverse().map(noteName).join(" ")}
+                </span>
+              ))}
+            {multi && <span className="chip">{info.tracks.length} pistas</span>}
             {info.tempo_bpm !== null && (
               <span className="chip mono">
                 ♩ {Math.round(info.tempo_bpm)} · {info.time_signature ? info.time_signature.join("/") : "4/4"}
@@ -140,7 +166,8 @@ function TabHeader({
       {omitted > 0 && (
         <p className="muted warn-note">
           {omitted} {omitted === 1 ? "nota não coube" : "notas não couberam"} no braço e{" "}
-          {omitted === 1 ? "foi omitida" : "foram omitidas"}.
+          {omitted === 1 ? "foi omitida" : "foram omitidas"}
+          {multi && perTrack.length > 0 && ` (${perTrack.map((t) => `${t.name}: ${t.count}`).join(", ")})`}.
         </p>
       )}
     </header>
@@ -228,10 +255,18 @@ function ExportMenu({ tab, onPrint }: { tab: Tab; onPrint: () => void }) {
 
 function TabPlayer({
   alphatex,
+  trackCount,
+  trackNames,
+  shown,
+  onShown,
   theme,
   onRenderFinished,
 }: {
   alphatex: string;
+  trackCount: number;
+  trackNames: string[];
+  shown: Shown;
+  onShown: (s: Shown) => void;
   theme: ScoreTheme;
   onRenderFinished: () => void;
 }) {
@@ -242,6 +277,7 @@ function TabPlayer({
   const hostRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<AlphaTabApi | null>(null);
   const themeRef = useRef(theme);
+  const shownRef = useRef(shown);
   const [rendered, setRendered] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -293,7 +329,8 @@ function TabPlayer({
       });
       api.playerStateChanged.on((e) => setPlaying(e.state === at.synth.PlayerState.Playing));
       api.playerPositionChanged.on((e) => setPos({ cur: e.currentTime, end: e.endTime }));
-      api.tex(alphatex);
+      // Only the shown tracks are drawn and played (alphaTab plays what it renders).
+      api.tex(alphatex, shownRef.current === "all" ? "all" : [shownRef.current]);
     })().catch(() => setError("Não foi possível iniciar o visualizador."));
 
     return () => {
@@ -302,6 +339,18 @@ function TabPlayer({
       api?.destroy();
     };
   }, [alphatex]);
+
+  // Another track choice: re-render in place (the score stays loaded) and restart playback.
+  useEffect(() => {
+    if (shownRef.current === shown) return;
+    shownRef.current = shown;
+    const api = apiRef.current;
+    const tracks = api?.score?.tracks;
+    if (!api || !tracks || tracks.length === 0) return;
+    api.stop();
+    setRendered(false);
+    api.renderTracks(shownIndexes(shown, tracks.length).map((i) => tracks[i]));
+  }, [shown]);
 
   // Runtime theme change: update resources in place and re-render.
   useEffect(() => {
@@ -336,6 +385,32 @@ function TabPlayer({
         {statusText}
       </p>
       <p role="alert" className="error">{error}</p>
+      {trackCount > 1 && (
+        <div className="segmented-inline track-picker" role="group" aria-label="Pistas">
+          <span className="seg-label" id="tracks-label">Pistas:</span>
+          {trackNames.map((name, i) => (
+            <button
+              key={`${i}-${name}`}
+              type="button"
+              className="seg-btn"
+              aria-pressed={shown === i}
+              aria-describedby="tracks-label"
+              onClick={() => onShown(i)}
+            >
+              {name}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="seg-btn"
+            aria-pressed={shown === "all"}
+            aria-describedby="tracks-label"
+            onClick={() => onShown("all")}
+          >
+            Todas
+          </button>
+        </div>
+      )}
       <div className="score-card" style={{ background: SCORE_COLORS[theme].background }} data-score-theme={theme}>
         <div ref={hostRef} className="at-host" data-testid="alphatab-host" />
         <div className="player" role="group" aria-label="Controlos de reprodução">

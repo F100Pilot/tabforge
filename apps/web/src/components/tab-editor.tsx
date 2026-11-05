@@ -28,7 +28,7 @@ import {
   noteAbove,
   noteBelow,
   noteName,
-  parseScore,
+  parseScoreDoc,
   pitchOf,
   playableStrings,
   previousNote,
@@ -39,10 +39,12 @@ import {
   undo,
   type Edit,
   type History,
-  type Score,
+  type ScoreDoc,
+  type TrackBody,
   type Selection,
   type TypeBuffer,
 } from "@/lib/editor";
+import { scoreTracks, withTrack } from "@/lib/tracks";
 import { SignInPrompt } from "./sign-in-prompt";
 import { formatDate } from "@/lib/format";
 import { loadScoreTheme, SCORE_COLORS, type ScoreTheme } from "@/lib/score-theme";
@@ -70,9 +72,9 @@ export function TabEditor({ tabId }: { tabId: string }) {
   if (needsLogin) return <SignInPrompt />;
   if (error) return <p role="alert" className="error">{error}</p>;
   if (!tab) return <p className="muted" role="status" aria-live="polite">A carregar o editor…</p>;
-  let score: Score;
+  let score: ScoreDoc;
   try {
-    score = parseScore(tab.revision.score);
+    score = parseScoreDoc(tab.revision.score);
   } catch {
     return <p role="alert" className="error">Esta tablatura não pode ser editada (formato desconhecido).</p>;
   }
@@ -80,7 +82,7 @@ export function TabEditor({ tabId }: { tabId: string }) {
 }
 
 interface UiState {
-  history: History<Score>;
+  history: History<ScoreDoc>;
   selection: Selection | null;
 }
 
@@ -111,7 +113,13 @@ function describeError(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
-function EditorBody({ tab, initialScore }: { tab: Tab; initialScore: Score }) {
+/** The editable part ({tuning, bars}) of one track of the score document. */
+function trackOf(doc: ScoreDoc, index: number): TrackBody {
+  const tracks = scoreTracks(doc);
+  return tracks[Math.min(index, tracks.length - 1)];
+}
+
+function EditorBody({ tab, initialScore }: { tab: Tab; initialScore: ScoreDoc }) {
   const [ui, setUi] = useState<UiState>({ history: createHistory(initialScore), selection: null });
   const uiRef = useRef(ui);
   const [savedScore, setSavedScore] = useState(initialScore);
@@ -124,6 +132,10 @@ function EditorBody({ tab, initialScore }: { tab: Tab; initialScore: Score }) {
   const [renderTick, setRenderTick] = useState(0);
   const [anchor, setAnchor] = useState<Anchor | null>(null);
   const [theme] = useState<ScoreTheme>(() => loadScoreTheme());
+  // ADR-0010: the editor edits one track at a time; the others are kept untouched.
+  const [trackIndex, setTrackIndex] = useState(0);
+  const trackIndexRef = useRef(0);
+  const trackNames = useMemo(() => scoreTracks(initialScore).map((t) => t.name), [initialScore]);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -138,8 +150,9 @@ function EditorBody({ tab, initialScore }: { tab: Tab; initialScore: Score }) {
   const savingRef = useRef(false);
 
   const { history, selection } = ui;
-  const score = history.present;
-  const dirty = score !== savedScore;
+  const doc = history.present;
+  const dirty = doc !== savedScore;
+  const score = useMemo(() => trackOf(doc, trackIndex), [doc, trackIndex]);
 
   const lastSelectionRef = useRef<Selection | null>(null);
 
@@ -148,6 +161,21 @@ function EditorBody({ tab, initialScore }: { tab: Tab; initialScore: Score }) {
     uiRef.current = next;
     setUi(next);
   }, []);
+
+  const changeTrack = useCallback(
+    (index: number) => {
+      if (index === trackIndexRef.current) return;
+      trackIndexRef.current = index;
+      setTrackIndex(index);
+      typeBufRef.current = null;
+      lastInputEditRef.current = null;
+      commit({ history: uiRef.current.history, selection: null });
+      const api = apiRef.current;
+      const tracks = api?.score?.tracks;
+      if (api && tracks?.[index]) api.renderTracks([tracks[index]]);
+    },
+    [commit],
+  );
 
   const select = useCallback(
     (sel: Selection | null) => {
@@ -161,7 +189,8 @@ function EditorBody({ tab, initialScore }: { tab: Tab; initialScore: Score }) {
   const applyEdit = useCallback(
     (edit: Edit | null, merge = false) => {
       if (!edit) return false;
-      commit({ history: pushHistory(uiRef.current.history, edit.score, merge), selection: edit.selection });
+      const next = withTrack(uiRef.current.history.present, trackIndexRef.current, edit.score);
+      commit({ history: pushHistory(uiRef.current.history, next, merge), selection: edit.selection });
       return true;
     },
     [commit],
@@ -173,7 +202,7 @@ function EditorBody({ tab, initialScore }: { tab: Tab; initialScore: Score }) {
     typeBufRef.current = null;
     lastInputEditRef.current = null;
     const nh = undo(h);
-    commit({ history: nh, selection: clampSelection(nh.present, s ?? lastSelectionRef.current) });
+    commit({ history: nh, selection: clampSelection(trackOf(nh.present, trackIndexRef.current), s ?? lastSelectionRef.current) });
   }, [commit]);
 
   const doRedo = useCallback(() => {
@@ -182,7 +211,7 @@ function EditorBody({ tab, initialScore }: { tab: Tab; initialScore: Score }) {
     typeBufRef.current = null;
     lastInputEditRef.current = null;
     const nh = redo(h);
-    commit({ history: nh, selection: clampSelection(nh.present, s) });
+    commit({ history: nh, selection: clampSelection(trackOf(nh.present, trackIndexRef.current), s) });
   }, [commit]);
 
   const refreshRevisions = useCallback(() => {
@@ -272,22 +301,25 @@ function EditorBody({ tab, initialScore }: { tab: Tab; initialScore: Score }) {
         setRenderError("Não foi possível apresentar a tablatura.");
       });
       api.noteMouseDown.on((note) => {
-        const tuningLen = uiRef.current.history.present.tuning.length;
-        const sel = clampSelection(uiRef.current.history.present, {
+        // Only the track being edited is drawn, but never trust a click on another one.
+        if (note.beat.voice.bar.staff.track.index !== trackIndexRef.current) return;
+        const current = trackOf(uiRef.current.history.present, trackIndexRef.current);
+        const tuningLen = current.tuning.length;
+        const sel = clampSelection(current, {
           bar: note.beat.voice.bar.index,
           beat: note.beat.index,
           string: tuningLen + 1 - note.string,
         });
         if (!sel) return;
         // Clamping may relocate to another note; only accept an exact hit.
-        if (!findNote(uiRef.current.history.present, sel)) return;
+        if (!findNote(current, sel)) return;
         containerRef.current?.focus({ preventScroll: true });
         select(sel);
       });
       api.beatMouseDown.on((beat) => {
         if (beat && beat.notes.length === 0) select(null);
       });
-      api.tex(pendingTexRef.current);
+      api.tex(pendingTexRef.current, [trackIndexRef.current]);
     })().catch(() => setRenderError("Não foi possível iniciar o editor."));
     return () => {
       disposed = true;
@@ -298,17 +330,17 @@ function EditorBody({ tab, initialScore }: { tab: Tab; initialScore: Score }) {
 
   // Every edit: server-side preview (also validation), then re-render. Last edit wins.
   useEffect(() => {
-    if (score === initialScoreRef.current) return;
+    if (doc === initialScoreRef.current) return;
     const ctrl = new AbortController();
     previewInFlightRef.current = true;
     const timer = setTimeout(() => {
       setSyncing(true);
-      previewScore(tab.id, score, ctrl.signal)
+      previewScore(tab.id, doc, ctrl.signal)
         .then((tex) => {
           previewInFlightRef.current = false;
           setPreviewError(null);
           pendingTexRef.current = tex;
-          if (apiRef.current) apiRef.current.tex(tex);
+          if (apiRef.current) apiRef.current.tex(tex, [trackIndexRef.current]);
         })
         .catch((err: unknown) => {
           if (ctrl.signal.aborted) return;
@@ -321,7 +353,7 @@ function EditorBody({ tab, initialScore }: { tab: Tab; initialScore: Score }) {
       clearTimeout(timer);
       ctrl.abort();
     };
-  }, [score, tab.id]);
+  }, [doc, tab.id]);
 
   // Anchor the inspector to the selected note head (also after every render / resize / scroll).
   const computeAnchor = useCallback(() => {
@@ -332,9 +364,9 @@ function EditorBody({ tab, initialScore }: { tab: Tab; initialScore: Score }) {
     if (!api || !stage || !host || !sel) return setAnchor(null);
     const abScore = api.score;
     const lookup = api.renderer.boundsLookup;
-    const abBeat = abScore?.tracks[0]?.staves[0]?.bars[sel.bar]?.voices[0]?.beats[sel.beat];
+    const abBeat = abScore?.tracks[trackIndexRef.current]?.staves[0]?.bars[sel.bar]?.voices[0]?.beats[sel.beat];
     if (!lookup || !abBeat) return setAnchor(null);
-    const tuningLen = uiRef.current.history.present.tuning.length;
+    const tuningLen = trackOf(uiRef.current.history.present, trackIndexRef.current).tuning.length;
     const nb = lookup.findBeat(abBeat)?.notes?.find((n) => n.note.string === tuningLen + 1 - sel.string);
     const surface = host.querySelector<HTMLElement>(".at-surface") ?? host.firstElementChild;
     if (!nb || !surface) return setAnchor(null);
@@ -386,7 +418,7 @@ function EditorBody({ tab, initialScore }: { tab: Tab; initialScore: Score }) {
       return;
     }
     const { history: h, selection: sel } = uiRef.current;
-    const sc = h.present;
+    const sc = trackOf(h.present, trackIndexRef.current);
     const move = (to: Selection | null) => {
       e.preventDefault();
       if (to) select(to);
@@ -481,6 +513,24 @@ function EditorBody({ tab, initialScore }: { tab: Tab; initialScore: Score }) {
           </button>
         </div>
       </header>
+
+      {trackNames.length > 1 && (
+        <div className="segmented-inline track-picker" role="group" aria-label="Pista a editar">
+          <span className="seg-label" id="edit-track-label">Pista a editar:</span>
+          {trackNames.map((name, i) => (
+            <button
+              key={`${i}-${name}`}
+              type="button"
+              className="seg-btn"
+              aria-pressed={trackIndex === i}
+              aria-describedby="edit-track-label"
+              onClick={() => changeTrack(i)}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="duration-bar" role="toolbar" aria-label="Durações (em breve)">
         <span className="seg-label">Duração</span>
@@ -619,7 +669,7 @@ function Inspector({
   onString,
   onDelete,
 }: {
-  score: Score;
+  score: TrackBody;
   selection: Selection;
   info: { note: { fret: number }; pitch: number; strings: number[]; alts: Array<{ string: number; fret: number }>; tied: boolean };
   anchor: Anchor;

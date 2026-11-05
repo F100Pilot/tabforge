@@ -19,6 +19,7 @@ import {
   formatPercent,
   referenceProblemMessage,
 } from "@/lib/comparison-view";
+import { matchingTrackIndex } from "@/lib/tracks";
 import {
   hasReferenceExtension,
   MAX_REFERENCE_FILE_BYTES,
@@ -38,7 +39,17 @@ interface Pending {
 type Busy = "loading" | "reading" | "sending" | "removing" | null;
 
 /** ADR-0009: compare the generated tab with the right one (a Guitar Pro file read in the browser). */
-export function TabCompare({ tabId, revisionKey }: { tabId: string; revisionKey: string }) {
+export function TabCompare({
+  tabId,
+  revisionKey,
+  trackNames,
+}: {
+  tabId: string;
+  revisionKey: string;
+  /** Names of the tab's own tracks (ADR-0010); each one keeps its own reference. */
+  trackNames: string[];
+}) {
+  const [tabTrack, setTabTrack] = useState(0);
   const [comparison, setComparison] = useState<Comparison | null>(null);
   const [reference, setReference] = useState<ReferenceSummary | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
@@ -49,7 +60,7 @@ export function TabCompare({ tabId, revisionKey }: { tabId: string; revisionKey:
 
   useEffect(() => {
     const ctrl = new AbortController();
-    Promise.all([getReference(tabId, ctrl.signal), getComparison(tabId, ctrl.signal)])
+    Promise.all([getReference(tabId, tabTrack, ctrl.signal), getComparison(tabId, tabTrack, ctrl.signal)])
       .then(([ref, cmp]) => {
         setReference(ref);
         setComparison(cmp);
@@ -62,7 +73,17 @@ export function TabCompare({ tabId, revisionKey }: { tabId: string; revisionKey:
         if (!ctrl.signal.aborted) setBusy(null);
       });
     return () => ctrl.abort();
-  }, [tabId, revisionKey]);
+  }, [tabId, revisionKey, tabTrack]);
+
+  function chooseTabTrack(index: number) {
+    if (index === tabTrack) return;
+    setReference(null);
+    setComparison(null);
+    setPending(null);
+    setError(null);
+    setBusy("loading");
+    setTabTrack(index);
+  }
 
   async function onFile(file: File | undefined) {
     if (inputRef.current) inputRef.current.value = "";
@@ -99,7 +120,8 @@ export function TabCompare({ tabId, revisionKey }: { tabId: string; revisionKey:
       if (read.tracks.length === 1) {
         await send(next, read.tracks[0]);
       } else {
-        setTrackIndex(read.tracks[0].index);
+        // Lead compares with a reference track called Lead, Rhythm with Rhythm, when there is one.
+        setTrackIndex(matchingTrackIndex(trackNames[tabTrack] ?? "", read.tracks) ?? read.tracks[0].index);
         setPending(next);
         setBusy(null);
       }
@@ -123,8 +145,8 @@ export function TabCompare({ tabId, revisionKey }: { tabId: string; revisionKey:
         setError(`A pista tem notas a mais (máximo ${MAX_REFERENCE_NOTES}).`);
         return;
       }
-      const summary = await putReference(tabId, { filename: p.filename, track: track.name, notes });
-      const cmp = await getComparison(tabId);
+      const summary = await putReference(tabId, { filename: p.filename, track: track.name, notes }, tabTrack);
+      const cmp = await getComparison(tabId, tabTrack);
       setReference(summary);
       setComparison(cmp);
       setPending(null);
@@ -139,7 +161,7 @@ export function TabCompare({ tabId, revisionKey }: { tabId: string; revisionKey:
     setError(null);
     setBusy("removing");
     try {
-      await deleteReference(tabId);
+      await deleteReference(tabId, tabTrack);
       setReference(null);
       setComparison(null);
       setPending(null);
@@ -187,6 +209,24 @@ export function TabCompare({ tabId, revisionKey }: { tabId: string; revisionKey:
           onChange={(e) => void onFile(e.target.files?.[0])}
         />
       </div>
+
+      {trackNames.length > 1 && (
+        <div className="compare-track">
+          <label htmlFor="compare-tab-track">Comparar a pista:</label>
+          <select
+            id="compare-tab-track"
+            value={tabTrack}
+            disabled={working}
+            onChange={(e) => chooseTabTrack(Number(e.target.value))}
+          >
+            {trackNames.map((name, i) => (
+              <option key={`${i}-${name}`} value={i}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <p role="status" aria-live="polite" className="muted compare-status">
         {status}

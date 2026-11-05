@@ -1,4 +1,10 @@
-/** Pure editing logic for Score v2. Every function returns new values and never mutates its inputs. */
+/**
+ * Pure editing logic on one track ({tuning, bars}) of a Score v2/v3. Every function returns new
+ * values and never mutates its inputs; the caller puts the result back with `withTrack`.
+ */
+import { scoreTracks, type TrackBody } from "./tracks";
+
+export type { TrackBody };
 
 export interface ScoreNote {
   string: number;
@@ -30,7 +36,8 @@ export interface Selection {
   string: number;
 }
 export interface Edit {
-  score: Score;
+  /** The edited track (same extra fields as the input track). */
+  score: TrackBody;
   selection: Selection | null;
 }
 
@@ -40,34 +47,52 @@ export const TYPE_WINDOW_MS = 700;
 
 const NAMES = ["Dó", "Dó#", "Ré", "Ré#", "Mi", "Fá", "Fá#", "Sol", "Sol#", "Lá", "Lá#", "Si"];
 
-export function parseScore(v: unknown): Score {
-  const bad = () => new Error("Partitura inválida.");
-  if (typeof v !== "object" || v === null) throw bad();
-  const r = v as Record<string, unknown>;
+const invalidScore = () => new Error("Partitura inválida.");
+
+function checkTrack(r: { tuning: unknown; bars: unknown }): void {
   if (
     !Array.isArray(r.tuning) ||
     r.tuning.length !== 6 ||
     !r.tuning.every((n) => Number.isInteger(n)) ||
     !Array.isArray(r.bars)
   ) {
-    throw bad();
+    throw invalidScore();
   }
   for (const bar of r.bars as unknown[]) {
     const b = bar as { beats?: unknown } | null;
-    if (!b || !Array.isArray(b.beats)) throw bad();
+    if (!b || !Array.isArray(b.beats)) throw invalidScore();
     for (const beat of b.beats as unknown[]) {
       const bt = beat as { notes?: unknown } | null;
-      if (!bt || !Array.isArray(bt.notes)) throw bad();
+      if (!bt || !Array.isArray(bt.notes)) throw invalidScore();
       for (const n of bt.notes as unknown[]) {
         const nn = n as { string?: unknown; fret?: unknown } | null;
-        if (!nn || !Number.isInteger(nn.string) || !Number.isInteger(nn.fret)) throw bad();
+        if (!nn || !Number.isInteger(nn.string) || !Number.isInteger(nn.fret)) throw invalidScore();
       }
     }
   }
+}
+
+/** A whole score document, v1/v2 (one track) or v3 (`tracks`). */
+export type ScoreDoc = Record<string, unknown>;
+
+/** Validates every track of a v1/v2/v3 score; throws "Partitura inválida." */
+export function parseScoreDoc(v: unknown): ScoreDoc {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) throw invalidScore();
+  const tracks = scoreTracks(v);
+  if (tracks.length === 0) throw invalidScore();
+  const raw = (v as { tracks?: unknown }).tracks;
+  if (Array.isArray(raw) && raw.length !== tracks.length) throw invalidScore();
+  tracks.forEach(checkTrack);
+  return v as ScoreDoc;
+}
+
+export function parseScore(v: unknown): Score {
+  if (typeof v !== "object" || v === null) throw invalidScore();
+  checkTrack(v as { tuning: unknown; bars: unknown });
   return v as Score;
 }
 
-export function pitchOf(score: Score, string: number, fret: number): number {
+export function pitchOf(score: TrackBody, string: number, fret: number): number {
   return score.tuning[string - 1] + fret;
 }
 
@@ -75,16 +100,16 @@ export function noteName(pitch: number): string {
   return `${NAMES[((pitch % 12) + 12) % 12]}${Math.floor(pitch / 12) - 1}`;
 }
 
-function beatAt(score: Score, bar: number, beat: number): ScoreBeat | null {
+function beatAt(score: TrackBody, bar: number, beat: number): ScoreBeat | null {
   return score.bars[bar]?.beats[beat] ?? null;
 }
 
-export function findNote(score: Score, s: Selection): ScoreNote | null {
+export function findNote(score: TrackBody, s: Selection): ScoreNote | null {
   return beatAt(score, s.bar, s.beat)?.notes.find((n) => n.string === s.string) ?? null;
 }
 
 /** Previous beat position (crossing barlines), or null at the start. */
-function prevPos(score: Score, bar: number, beat: number): [number, number] | null {
+function prevPos(score: TrackBody, bar: number, beat: number): [number, number] | null {
   if (beat > 0) return [bar, beat - 1];
   for (let b = bar - 1; b >= 0; b--) {
     const n = score.bars[b].beats.length;
@@ -93,7 +118,7 @@ function prevPos(score: Score, bar: number, beat: number): [number, number] | nu
   return null;
 }
 
-function nextPos(score: Score, bar: number, beat: number): [number, number] | null {
+function nextPos(score: TrackBody, bar: number, beat: number): [number, number] | null {
   if (beat + 1 < (score.bars[bar]?.beats.length ?? 0)) return [bar, beat + 1];
   for (let b = bar + 1; b < score.bars.length; b++) {
     if (score.bars[b].beats.length > 0) return [b, 0];
@@ -102,7 +127,7 @@ function nextPos(score: Score, bar: number, beat: number): [number, number] | nu
 }
 
 /** The notes of a tie chain on one string, origin first. Null when the note does not exist. */
-export function chainOf(score: Score, s: Selection): Selection[] | null {
+export function chainOf(score: TrackBody, s: Selection): Selection[] | null {
   if (!findNote(score, s)) return null;
   let origin: Selection = { bar: s.bar, beat: s.beat, string: s.string };
   for (;;) {
@@ -129,10 +154,10 @@ export function chainOf(score: Score, s: Selection): Selection[] | null {
 }
 
 function rebuild(
-  score: Score,
+  score: TrackBody,
   chain: Selection[],
   fn: (notes: ScoreNote[], at: Selection) => ScoreNote[],
-): Score {
+): TrackBody {
   const byBar = new Map<number, Map<number, Selection>>();
   for (const c of chain) {
     if (!byBar.has(c.bar)) byBar.set(c.bar, new Map());
@@ -155,7 +180,7 @@ function rebuild(
 }
 
 /** Strings where the chain's pitch is playable (0..24) and no other note of any chain beat uses them. Includes the current string. */
-export function playableStrings(score: Score, s: Selection): number[] {
+export function playableStrings(score: TrackBody, s: Selection): number[] {
   const chain = chainOf(score, s);
   if (!chain) return [];
   const origin = chain[0];
@@ -173,7 +198,7 @@ export function playableStrings(score: Score, s: Selection): number[] {
   return out;
 }
 
-export function alternatives(score: Score, s: Selection): Array<{ string: number; fret: number }> {
+export function alternatives(score: TrackBody, s: Selection): Array<{ string: number; fret: number }> {
   const chain = chainOf(score, s);
   if (!chain) return [];
   const pitch = pitchOf(score, s.string, findNote(score, chain[0])!.fret);
@@ -182,7 +207,7 @@ export function alternatives(score: Score, s: Selection): Array<{ string: number
     .map((str) => ({ string: str, fret: pitch - score.tuning[str - 1] }));
 }
 
-export function setFret(score: Score, s: Selection, fret: number): Edit | null {
+export function setFret(score: TrackBody, s: Selection, fret: number): Edit | null {
   if (!Number.isInteger(fret) || fret < 0 || fret > MAX_FRET) return null;
   const chain = chainOf(score, s);
   if (!chain) return null;
@@ -193,7 +218,7 @@ export function setFret(score: Score, s: Selection, fret: number): Edit | null {
   return { score: next, selection: s };
 }
 
-export function moveToString(score: Score, s: Selection, target: number): Edit | null {
+export function moveToString(score: TrackBody, s: Selection, target: number): Edit | null {
   if (target === s.string || !playableStrings(score, s).includes(target)) return null;
   const chain = chainOf(score, s)!;
   const fret = pitchOf(score, s.string, findNote(score, chain[0])!.fret) - score.tuning[target - 1];
@@ -205,7 +230,7 @@ export function moveToString(score: Score, s: Selection, target: number): Edit |
   return { score: next, selection: { ...s, string: target } };
 }
 
-export function deleteNote(score: Score, s: Selection): Edit | null {
+export function deleteNote(score: TrackBody, s: Selection): Edit | null {
   const chain = chainOf(score, s);
   if (!chain) return null;
   const next = rebuild(score, chain, (notes, at) => notes.filter((n) => n.string !== at.string));
@@ -213,7 +238,7 @@ export function deleteNote(score: Score, s: Selection): Edit | null {
   return { score: next, selection: clampSelection(next, { ...s }) };
 }
 
-function sortedStrings(score: Score, bar: number, beat: number): number[] {
+function sortedStrings(score: TrackBody, bar: number, beat: number): number[] {
   return (beatAt(score, bar, beat)?.notes ?? []).map((n) => n.string).sort((a, b) => a - b);
 }
 
@@ -221,14 +246,14 @@ function nearest(strings: number[], target: number): number {
   return strings.reduce((best, s) => (Math.abs(s - target) <= Math.abs(best - target) ? s : best), strings[0]);
 }
 
-export function clampSelection(score: Score, s: Selection | null): Selection | null {
+export function clampSelection(score: TrackBody, s: Selection | null): Selection | null {
   if (!s) return null;
   const strings = sortedStrings(score, s.bar, s.beat);
   if (strings.length === 0) return null;
   return { ...s, string: strings.includes(s.string) ? s.string : nearest(strings, s.string) };
 }
 
-export function firstNote(score: Score): Selection | null {
+export function firstNote(score: TrackBody): Selection | null {
   for (let b = 0; b < score.bars.length; b++) {
     for (let t = 0; t < score.bars[b].beats.length; t++) {
       const strings = sortedStrings(score, b, t);
@@ -238,7 +263,7 @@ export function firstNote(score: Score): Selection | null {
   return null;
 }
 
-function step(score: Score, s: Selection, dir: 1 | -1): Selection | null {
+function step(score: TrackBody, s: Selection, dir: 1 | -1): Selection | null {
   let pos: [number, number] | null = [s.bar, s.beat];
   for (;;) {
     pos = dir === 1 ? nextPos(score, pos[0], pos[1]) : prevPos(score, pos[0], pos[1]);
@@ -248,16 +273,16 @@ function step(score: Score, s: Selection, dir: 1 | -1): Selection | null {
   }
 }
 
-export const nextNote = (score: Score, s: Selection) => step(score, s, 1);
-export const previousNote = (score: Score, s: Selection) => step(score, s, -1);
+export const nextNote = (score: TrackBody, s: Selection) => step(score, s, 1);
+export const previousNote = (score: TrackBody, s: Selection) => step(score, s, -1);
 
 /** Up on the tab = a lower string number. */
-export function noteAbove(score: Score, s: Selection): Selection | null {
+export function noteAbove(score: TrackBody, s: Selection): Selection | null {
   const above = sortedStrings(score, s.bar, s.beat).filter((x) => x < s.string);
   return above.length ? { ...s, string: above[above.length - 1] } : null;
 }
 
-export function noteBelow(score: Score, s: Selection): Selection | null {
+export function noteBelow(score: TrackBody, s: Selection): Selection | null {
   const below = sortedStrings(score, s.bar, s.beat).filter((x) => x > s.string);
   return below.length ? { ...s, string: below[0] } : null;
 }
