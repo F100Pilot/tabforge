@@ -42,8 +42,8 @@
 - [ ] Partilha pública (US-06) — bloqueado por ADR-0003
 
 - [ ] Comparar e afinar (depois do PR #9): importar a tab certa (.gp 3–7 via alphaTab) de uma música já transcrita, alinhar com a versão da IA (introduções, repetições, tempo), mostrar métricas (notas encontradas, posições corretas)
-- [ ] Afinar os pesos de corda/traste (Viterbi) por utilizador com as tabs certas importadas e com os pares revisão IA → revisão corrigida no editor; aplicar às tabs novas e medir antes/depois
-- [ ] Afinar a quantização (tercinas, pausas, tempo) com pares áudio + tab certa alinhados
+- [x] Afinar os pesos de corda/traste (Viterbi) por utilizador com as tabs certas importadas e com as revisões corrigidas no editor (ADR-0011): perfil `fretting_profiles`, marcado pela API e atualizado pelo worker (grelha de 175 combinações, validação cruzada por tab com ≥ 3 tabs, aceite só se melhor que os pesos por omissão, mínimo 200 notas e 2 tabs); `GET/POST /v1/me/tuning`; as tabs novas usam os pesos aceites
+- [ ] Aprender o ritmo (quantização: tercinas, pausas, tempo) com pares áudio + tab certa alinhados — por fazer (ADR-0011 só aprende corda/traste)
 - [ ] (Reavaliar com dados suficientes) fine-tuning da deteção de notas — o treino do Basic Pitch usa TensorFlow (excluído, ADR-0002) e o modelo ONNX não é treinável diretamente
 
 ## Desktop (ADR-0008)
