@@ -1,5 +1,6 @@
 /** Presentation helpers for the ADR-0009 comparison card (pure, pt-PT). */
-import { ProblemError, type BarComparison, type Comparison } from "./api";
+import { ProblemError, type BarComparison, type Comparison, type Difference, type Differences } from "./api";
+import { noteName } from "./editor";
 
 export function formatPercent(v: number | null): string {
   return v === null ? "—" : `${Math.round(v * 100)} %`;
@@ -43,4 +44,54 @@ export function referenceProblemMessage(err: unknown): string {
     return err.message;
   }
   return "Não foi possível comparar a tablatura.";
+}
+
+const PT_NOTES = ["Dó", "Dó#", "Ré", "Ré#", "Mi", "Fá", "Fá#", "Sol", "Sol#", "Lá", "Lá#", "Si"];
+
+/** Solfège name with octave ("Mi4" for MIDI 64). */
+export function ptNoteName(pitch: number): string {
+  const idx = ((pitch % 12) + 12) % 12;
+  // Reuse the editor's octave convention so both views agree.
+  const octave = noteName(pitch).replace(/^\D+/, "");
+  return `${PT_NOTES[idx]}${octave}`;
+}
+
+/** One line for the list of detected corrections (pt-PT). */
+export function describeDifference(d: Difference): string {
+  const head = `Compasso ${d.bar} · ${ptNoteName(d.pitch)} — `;
+  switch (d.kind) {
+    case "position":
+      return d.ai && d.ref
+        ? `${head}IA: corda ${d.ai.string}, traste ${d.ai.fret} → certa: corda ${d.ref.string}, traste ${d.ref.fret}`
+        : `${head}posição errada`;
+    case "missing":
+      return `${head}em falta na IA`;
+    case "extra":
+      return `${head}nota a mais na IA`;
+    case "timing":
+      return d.onset_error === null
+        ? `${head}ataque desviado`
+        : `${head}ataque desviado ≈ ${formatDecimal(d.onset_error)} tempo`;
+  }
+}
+
+/** "12 posições erradas · 30 notas em falta · 8 a mais · 5 ritmo"; zero counts are left out. */
+export function correctionsSummary(c: Differences["counts"]): string {
+  const parts: string[] = [];
+  if (c.position > 0) parts.push(`${c.position} ${c.position === 1 ? "posição errada" : "posições erradas"}`);
+  if (c.missing > 0) parts.push(`${c.missing} ${c.missing === 1 ? "nota em falta" : "notas em falta"}`);
+  if (c.extra > 0) parts.push(`${c.extra} a mais`);
+  if (c.timing > 0) parts.push(`${c.timing} ritmo`);
+  return parts.length > 0 ? parts.join(" · ") : "Nenhuma diferença detetada.";
+}
+
+export function applyResultMessage(applied: number, skipped: number): string {
+  const skippedText = skipped > 0 ? ` (${skipped} ${skipped === 1 ? "ignorada" : "ignoradas"}: corda ocupada)` : "";
+  if (applied === 0) return `Nenhuma posição corrigida${skippedText}`;
+  return `${applied === 1 ? "Corrigida 1 posição" : `Corrigidas ${applied} posições`}${skippedText}`;
+}
+
+/** Message for a 409 `revision_conflict`; null for any other error. */
+export function conflictMessage(err: unknown): string | null {
+  return err instanceof ProblemError && err.status === 409 ? "A tab mudou noutro lado; recarregue." : null;
 }

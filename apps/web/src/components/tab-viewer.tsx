@@ -83,7 +83,12 @@ export function TabViewer({ tabId }: { tabId: string }) {
   return (
     <>
       <TabHeader tab={tab} info={info} theme={theme} onTheme={changeTheme} onPrint={print} />
-      <TabCompare tabId={tab.id} revisionKey={tab.revision.id} trackNames={info.tracks.map((t) => t.name)} />
+      <TabCompare
+        tabId={tab.id}
+        revisionKey={tab.revision.id}
+        trackNames={info.tracks.map((t) => t.name)}
+        onTabChanged={setTab}
+      />
       <TabPlayer
         alphatex={tab.alphatex}
         trackCount={info.tracks.length}

@@ -3,16 +3,22 @@
 import { useEffect, useRef, useState } from "react";
 import type * as AlphaTab from "@coderline/alphatab";
 import {
+  applyCorrections,
   deleteReference,
   getComparison,
   getReference,
   isUnauthenticated,
   putReference,
   type Comparison,
+  type Tab,
   type ReferenceSummary,
 } from "@/lib/api";
 import {
   alignmentNotes,
+  applyResultMessage,
+  conflictMessage,
+  correctionsSummary,
+  describeDifference,
   barDescription,
   barRatio,
   formatDecimal,
@@ -36,18 +42,23 @@ interface Pending {
   tracks: ReferenceTrack[];
 }
 
-type Busy = "loading" | "reading" | "sending" | "removing" | null;
+type Busy = "loading" | "reading" | "sending" | "removing" | "applying" | null;
+
+const LIST_LIMIT = 50;
 
 /** ADR-0009: compare the generated tab with the right one (a Guitar Pro file read in the browser). */
 export function TabCompare({
   tabId,
   revisionKey,
   trackNames,
+  onTabChanged,
 }: {
   tabId: string;
   revisionKey: string;
   /** Names of the tab's own tracks (ADR-0010); each one keeps its own reference. */
   trackNames: string[];
+  /** Called with the new tab when applying corrections created a revision, so the viewer reloads it. */
+  onTabChanged?: (tab: Tab) => void;
 }) {
   const [tabTrack, setTabTrack] = useState(0);
   const [comparison, setComparison] = useState<Comparison | null>(null);
@@ -56,6 +67,8 @@ export function TabCompare({
   const [trackIndex, setTrackIndex] = useState(0);
   const [busy, setBusy] = useState<Busy>("loading");
   const [error, setError] = useState<string | null>(null);
+  const [applyMessage, setApplyMessage] = useState<string | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -81,6 +94,8 @@ export function TabCompare({
     setComparison(null);
     setPending(null);
     setError(null);
+    setApplyMessage(null);
+    setApplyError(null);
     setBusy("loading");
     setTabTrack(index);
   }
@@ -172,6 +187,23 @@ export function TabCompare({
     }
   }
 
+  async function applyPositions() {
+    setApplyMessage(null);
+    setApplyError(null);
+    setBusy("applying");
+    try {
+      const r = await applyCorrections(tabId, tabTrack, revisionKey, ["position"]);
+      setApplyMessage(applyResultMessage(r.applied, r.skipped));
+      if (r.applied > 0) onTabChanged?.(r.tab);
+      setComparison(await getComparison(tabId, tabTrack));
+    } catch (err) {
+      if (isUnauthenticated(err)) setApplyError("A sessão expirou. Entre outra vez.");
+      else setApplyError(conflictMessage(err) ?? referenceProblemMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const working = busy !== null;
   const status =
     busy === "loading"
@@ -182,7 +214,9 @@ export function TabCompare({
           ? "A comparar…"
           : busy === "removing"
             ? "A remover…"
-            : "";
+            : busy === "applying"
+              ? "A aplicar correções…"
+              : "";
 
   const hasResult = comparison !== null;
   return (
@@ -268,13 +302,36 @@ export function TabCompare({
         </p>
       )}
 
-      {hasResult && <ComparisonResult cmp={comparison} reference={reference} />}
+      {hasResult && (
+        <ComparisonResult
+          cmp={comparison}
+          reference={reference}
+          working={working}
+          onApply={() => void applyPositions()}
+          applyMessage={applyMessage}
+          applyError={applyError}
+        />
+      )}
       <p className="muted compare-limit">Repetições da tab certa não são expandidas.</p>
     </section>
   );
 }
 
-function ComparisonResult({ cmp, reference }: { cmp: Comparison; reference: ReferenceSummary | null }) {
+function ComparisonResult({
+  cmp,
+  reference,
+  working,
+  onApply,
+  applyMessage,
+  applyError,
+}: {
+  cmp: Comparison;
+  reference: ReferenceSummary | null;
+  working: boolean;
+  onApply: () => void;
+  applyMessage: string | null;
+  applyError: string | null;
+}) {
   const align = alignmentNotes(cmp);
   return (
     <div className="compare-result">
@@ -300,7 +357,68 @@ function ComparisonResult({ cmp, reference }: { cmp: Comparison; reference: Refe
           ))}
         </ul>
       )}
+      <Corrections
+        d={cmp.differences}
+        working={working}
+        onApply={onApply}
+        message={applyMessage}
+        error={applyError}
+      />
       {cmp.bars.length > 0 && <BarStrip bars={cmp.bars} />}
+    </div>
+  );
+}
+
+function Corrections({
+  d,
+  working,
+  onApply,
+  message,
+  error,
+}: {
+  d: Comparison["differences"];
+  working: boolean;
+  onApply: () => void;
+  message: string | null;
+  error: string | null;
+}) {
+  const shown = d.items.slice(0, LIST_LIMIT);
+  const hidden = d.counts.position + d.counts.missing + d.counts.extra + d.counts.timing - shown.length;
+  return (
+    <div className="corrections">
+      <h3 className="compare-sub" id="corrections-title">Correções detetadas</h3>
+      <p className="corrections-summary">{correctionsSummary(d.counts)}</p>
+      {shown.length > 0 && (
+        <details className="corrections-list">
+          <summary>Ver diferenças ({d.items.length}{d.truncated ? "+" : ""})</summary>
+          <ul aria-labelledby="corrections-title">
+            {shown.map((it, i) => (
+              <li key={`${it.kind}-${it.bar}-${it.onset}-${it.pitch}-${i}`} className={`diff diff-${it.kind}`}>
+                {describeDifference(it)}
+              </li>
+            ))}
+          </ul>
+          {hidden > 0 && (
+            <p className="muted compare-legend">
+              … e mais {hidden}
+              {d.truncated ? " (lista truncada pelo servidor)" : ""}
+            </p>
+          )}
+        </details>
+      )}
+      <div className="corrections-actions">
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={working || d.counts.position === 0}
+          onClick={onApply}
+        >
+          Aplicar correções de posição ({d.counts.position})
+        </button>
+      </div>
+      <p role="status" aria-live="polite" className="corrections-result">{message}</p>
+      <p role="alert" className="error">{error}</p>
+      <p className="muted compare-limit">Notas em falta ou a mais ficam só detetadas: corrigi-las muda os compassos.</p>
     </div>
   );
 }

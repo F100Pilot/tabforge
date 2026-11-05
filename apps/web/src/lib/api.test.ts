@@ -6,6 +6,8 @@ import {
   parseProblem,
   csrfHeaders,
   getSession,
+  applyCorrections,
+  parseDifferences,
   getComparison,
   getReference,
   putReference,
@@ -206,6 +208,75 @@ describe("parseComparison", () => {
     expect(() => parseComparison({ ...comparison, recall: "x" })).toThrow(ResponseShapeError);
     expect(() => parseComparison({ ...comparison, bars: [{ bar: 1 }] })).toThrow(ResponseShapeError);
     expect(() => parseComparison(null)).toThrow(ResponseShapeError);
+  });
+});
+
+const diffs = {
+  counts: { position: 1, missing: 2, extra: 0, timing: 1 },
+  items: [
+    { kind: "position", bar: 2, onset: 5, pitch: 64, ai: { string: 2, fret: 5, bar: 1, beat: 1 }, ref: { string: 1, fret: 0 }, onset_error: null },
+    { kind: "missing", bar: 3, onset: 9, pitch: 55, ai: null, ref: { string: 3, fret: 0 }, onset_error: null },
+    { kind: "timing", bar: 4, onset: 13, pitch: 62, ai: { string: 3, fret: 7, bar: 3, beat: 0 }, ref: { string: 3, fret: 7 }, onset_error: 0.2 },
+  ],
+  truncated: false,
+};
+
+describe("parseDifferences", () => {
+  it("treats a missing field (older API) as none", () => {
+    const c = parseComparison(comparison);
+    expect(c.differences.items).toEqual([]);
+    expect(c.differences.counts).toEqual({ position: 0, missing: 0, extra: 0, timing: 0 });
+    expect(c.differences.truncated).toBe(false);
+  });
+  it("parses items", () => {
+    const d = parseComparison({ ...comparison, differences: diffs }).differences;
+    expect(d.counts.missing).toBe(2);
+    expect(d.items[1].ai).toBeNull();
+    expect(d.items[2].onset_error).toBe(0.2);
+  });
+  it("rejects malformed differences", () => {
+    expect(() => parseDifferences(null)).toThrow(ResponseShapeError);
+    expect(() => parseDifferences({ ...diffs, truncated: "no" })).toThrow(ResponseShapeError);
+    expect(() => parseDifferences({ ...diffs, counts: { position: 1 } })).toThrow(ResponseShapeError);
+    expect(() => parseDifferences({ ...diffs, items: [{ ...diffs.items[0], kind: "other" }] })).toThrow(ResponseShapeError);
+    expect(() => parseDifferences({ ...diffs, items: [{ ...diffs.items[0], ai: { string: 1 } }] })).toThrow(ResponseShapeError);
+  });
+});
+
+describe("applyCorrections", () => {
+  beforeEach(() => vi.stubEnv("NEXT_PUBLIC_API_URL", "http://localhost:8000"));
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    setCsrfToken(null);
+  });
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  const tab = {
+    id: "t1", title: "x", tuning: [], visibility: "private", created_at: "2026-01-01",
+    revision: { id: "r2", source: "user", created_at: "2026-01-02", score: {} }, alphatex: "\\title x",
+  };
+
+  it("posts base revision and kinds with csrf, ?track only when > 0", async () => {
+    setCsrfToken("tok");
+    const f = vi.fn().mockImplementation(async () => json(201, { tab, applied: 3, skipped: 1 }));
+    vi.stubGlobal("fetch", f);
+    const r = await applyCorrections("t1", 0, "r1", ["position"]);
+    await applyCorrections("t1", 2, "r1", ["position"]);
+    expect(r).toMatchObject({ applied: 3, skipped: 1 });
+    expect(r.tab.revision.id).toBe("r2");
+    expect(String(f.mock.calls[0][0])).toMatch(/\/v1\/tabs\/t1\/comparison\/apply$/);
+    expect(String(f.mock.calls[1][0])).toMatch(/\/comparison\/apply\?track=2$/);
+    const init = f.mock.calls[0][1];
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ base_revision_id: "r1", kinds: ["position"] });
+    expect((init.headers as Headers).get("X-CSRF-Token")).toBe("tok");
+  });
+  it("throws ProblemError on 409 and ResponseShapeError on a bad body", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(json(409, { code: "revision_conflict", detail: "x" })));
+    await expect(applyCorrections("t1", 0, "r1", ["position"])).rejects.toMatchObject({ status: 409, code: "revision_conflict" });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(json(200, { applied: 0 })));
+    await expect(applyCorrections("t1", 0, "r1", ["position"])).rejects.toBeInstanceOf(ResponseShapeError);
   });
 });
 

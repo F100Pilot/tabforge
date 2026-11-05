@@ -510,6 +510,32 @@ export interface Comparison {
   position_accuracy: number | null;
   onset_error: number | null;
   bars: BarComparison[];
+  differences: Differences;
+}
+
+export type DifferenceKind = "position" | "missing" | "extra" | "timing";
+export const DIFFERENCE_KINDS: DifferenceKind[] = ["position", "missing", "extra", "timing"];
+
+export interface Difference {
+  kind: DifferenceKind;
+  bar: number;
+  onset: number;
+  pitch: number;
+  ai: { string: number; fret: number; bar: number; beat: number } | null;
+  ref: { string: number; fret: number } | null;
+  onset_error: number | null;
+}
+
+export interface Differences {
+  counts: Record<DifferenceKind, number>;
+  items: Difference[];
+  truncated: boolean;
+}
+
+export interface AppliedCorrections {
+  tab: Tab;
+  applied: number;
+  skipped: number;
 }
 
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -520,6 +546,65 @@ export function parseReferenceSummary(v: unknown): ReferenceSummary {
     throw new ResponseShapeError("reference");
   }
   return { filename: v.filename, track: v.track, notes: v.notes, created_at: v.created_at };
+}
+
+export const NO_DIFFERENCES: Differences = {
+  counts: { position: 0, missing: 0, extra: 0, timing: 0 },
+  items: [],
+  truncated: false,
+};
+
+/** `undefined` (older API without `differences`) means none; anything else must be well formed. */
+export function parseDifferences(v: unknown): Differences {
+  if (v === undefined) return { ...NO_DIFFERENCES, counts: { ...NO_DIFFERENCES.counts }, items: [] };
+  if (!isRec(v) || !isRec(v.counts) || !Array.isArray(v.items) || typeof v.truncated !== "boolean") {
+    throw new ResponseShapeError("differences");
+  }
+  const counts = {} as Record<DifferenceKind, number>;
+  for (const k of DIFFERENCE_KINDS) {
+    const n = (v.counts as Rec)[k];
+    if (!isNum(n) || !Number.isInteger(n) || n < 0) throw new ResponseShapeError("differences counts");
+    counts[k] = n;
+  }
+  const items = v.items.map((d): Difference => {
+    if (
+      !isRec(d) ||
+      typeof d.kind !== "string" ||
+      !(DIFFERENCE_KINDS as string[]).includes(d.kind) ||
+      !isNum(d.bar) ||
+      !isNum(d.onset) ||
+      !isNum(d.pitch) ||
+      !isNullableNum(d.onset_error ?? null)
+    ) {
+      throw new ResponseShapeError("difference");
+    }
+    const ai = d.ai ?? null;
+    if (
+      ai !== null &&
+      !(isRec(ai) && isNum(ai.string) && isNum(ai.fret) && isNum(ai.bar) && isNum(ai.beat))
+    ) {
+      throw new ResponseShapeError("difference ai");
+    }
+    const ref = d.ref ?? null;
+    if (ref !== null && !(isRec(ref) && isNum(ref.string) && isNum(ref.fret))) {
+      throw new ResponseShapeError("difference ref");
+    }
+    return {
+      kind: d.kind as DifferenceKind,
+      bar: d.bar,
+      onset: d.onset,
+      pitch: d.pitch,
+      ai: ai && { string: (ai as Rec).string as number, fret: (ai as Rec).fret as number, bar: (ai as Rec).bar as number, beat: (ai as Rec).beat as number },
+      ref: ref && { string: (ref as Rec).string as number, fret: (ref as Rec).fret as number },
+      onset_error: (d.onset_error as number | null | undefined) ?? null,
+    };
+  });
+  return { counts, items, truncated: v.truncated };
+}
+
+export function parseAppliedCorrections(v: unknown): AppliedCorrections {
+  if (!isRec(v) || !isNum(v.applied) || !isNum(v.skipped)) throw new ResponseShapeError("corrections");
+  return { tab: parseTab(v.tab), applied: v.applied, skipped: v.skipped };
 }
 
 export function parseComparison(v: unknown): Comparison {
@@ -559,6 +644,7 @@ export function parseComparison(v: unknown): Comparison {
     position_accuracy: v.position_accuracy,
     onset_error: v.onset_error,
     bars,
+    differences: parseDifferences(v.differences),
   };
 }
 
@@ -610,5 +696,24 @@ export async function deleteReference(tabId: string, trackIndex = 0): Promise<vo
 export function getComparison(tabId: string, trackIndex = 0, signal?: AbortSignal): Promise<Comparison | null> {
   return nullOnMissingReference(async () =>
     parseComparison(await request(`/v1/tabs/${encodeURIComponent(tabId)}/comparison${trackQuery(trackIndex)}`, { signal })),
+  );
+}
+
+/**
+ * Applies the detected corrections of the given kinds as a new revision (only `position` today).
+ * 409 `revision_conflict` when `baseRevisionId` is no longer current; 200 with `applied: 0` creates nothing.
+ */
+export async function applyCorrections(
+  tabId: string,
+  trackIndex: number,
+  baseRevisionId: string,
+  kinds: DifferenceKind[],
+): Promise<AppliedCorrections> {
+  return parseAppliedCorrections(
+    await request(`/v1/tabs/${encodeURIComponent(tabId)}/comparison/apply${trackQuery(trackIndex)}`, {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ base_revision_id: baseRevisionId, kinds }),
+    }),
   );
 }

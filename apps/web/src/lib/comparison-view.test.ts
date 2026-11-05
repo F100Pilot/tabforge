@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { BarComparison, Comparison } from "./api";
-import { alignmentNotes, barDescription, barRatio, formatDecimal, formatPercent, referenceProblemMessage } from "./comparison-view";
+import type { BarComparison, Comparison, Difference } from "./api";
+import { alignmentNotes, barDescription, barRatio, correctionsSummary, describeDifference, applyResultMessage, conflictMessage, formatDecimal, formatPercent, referenceProblemMessage } from "./comparison-view";
 import { ProblemError } from "./api";
 
 const base: Comparison = {
@@ -16,6 +16,7 @@ const base: Comparison = {
   position_accuracy: null,
   onset_error: null,
   bars: [],
+  differences: { counts: { position: 0, missing: 0, extra: 0, timing: 0 }, items: [], truncated: false },
 };
 
 describe("formatters", () => {
@@ -61,5 +62,58 @@ describe("referenceProblemMessage", () => {
     expect(referenceProblemMessage(p(422))).toMatch(/não é válida/);
     expect(referenceProblemMessage(p(404))).toMatch(/já não existe/);
     expect(referenceProblemMessage(new Error("x"))).toBe("Não foi possível comparar a tablatura.");
+  });
+});
+
+const d = (over: Partial<Difference>): Difference => ({
+  kind: "position", bar: 12, onset: 1, pitch: 64,
+  ai: { string: 2, fret: 5, bar: 11, beat: 0 }, ref: { string: 1, fret: 0 }, onset_error: null, ...over,
+});
+
+describe("describeDifference", () => {
+  it("position", () => {
+    expect(describeDifference(d({}))).toBe("Compasso 12 · Mi4 — IA: corda 2, traste 5 → certa: corda 1, traste 0");
+  });
+  it("missing", () => {
+    expect(describeDifference(d({ kind: "missing", bar: 7, pitch: 55, ai: null }))).toBe("Compasso 7 · Sol3 — em falta na IA");
+  });
+  it("extra", () => {
+    expect(describeDifference(d({ kind: "extra", bar: 9, pitch: 69, ref: null }))).toBe("Compasso 9 · Lá4 — nota a mais na IA");
+  });
+  it("timing", () => {
+    expect(describeDifference(d({ kind: "timing", bar: 3, pitch: 62, onset_error: 0.2 }))).toBe(
+      "Compasso 3 · Ré4 — ataque desviado ≈ 0,2 tempo",
+    );
+    expect(describeDifference(d({ kind: "timing", onset_error: null }))).toContain("ataque desviado");
+  });
+  it("position without detail falls back gracefully", () => {
+    expect(describeDifference(d({ ai: null, ref: null }))).toBe("Compasso 12 · Mi4 — posição errada");
+  });
+});
+
+describe("correctionsSummary", () => {
+  it("lists non-zero counts, pluralised", () => {
+    expect(correctionsSummary({ position: 12, missing: 30, extra: 8, timing: 5 })).toBe(
+      "12 posições erradas · 30 notas em falta · 8 a mais · 5 ritmo",
+    );
+    expect(correctionsSummary({ position: 1, missing: 1, extra: 0, timing: 0 })).toBe("1 posição errada · 1 nota em falta");
+  });
+  it("says nothing was detected", () => {
+    expect(correctionsSummary({ position: 0, missing: 0, extra: 0, timing: 0 })).toBe("Nenhuma diferença detetada.");
+  });
+});
+
+describe("apply messages", () => {
+  it("result", () => {
+    expect(applyResultMessage(5, 2)).toBe("Corrigidas 5 posições (2 ignoradas: corda ocupada)");
+    expect(applyResultMessage(1, 1)).toBe("Corrigida 1 posição (1 ignorada: corda ocupada)");
+    expect(applyResultMessage(3, 0)).toBe("Corrigidas 3 posições");
+    expect(applyResultMessage(0, 4)).toBe("Nenhuma posição corrigida (4 ignoradas: corda ocupada)");
+  });
+  it("conflict", () => {
+    expect(conflictMessage(new ProblemError({ status: 409, code: "revision_conflict", title: "t", detail: "d" }))).toBe(
+      "A tab mudou noutro lado; recarregue.",
+    );
+    expect(conflictMessage(new Error("x"))).toBeNull();
   });
 });
