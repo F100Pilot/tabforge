@@ -118,7 +118,8 @@ test("sign in, transcribe, edit, sign out and delete the account", async ({ page
     await page.getByRole("button", { name: /Exportar/ }).click();
     const [download] = await Promise.all([
       page.waitForEvent("download"),
-      page.getByRole("button", { name: new RegExp(label) }).click(),
+      // Scoped to the export menu: the comparison card also has "Guitar Pro" buttons.
+      page.locator("#export-menu").getByRole("button", { name: new RegExp(label) }).click(),
     ]);
     expect(download.suggestedFilename()).toMatch(new RegExp(`\\${ext}$`));
     expect((await downloadBytes(download)).subarray(0, magic.length).toString("latin1")).toBe(magic);
@@ -131,7 +132,7 @@ test("sign in, transcribe, edit, sign out and delete the account", async ({ page
     };
   });
   await page.getByRole("button", { name: /Exportar/ }).click();
-  await page.getByRole("button", { name: "Imprimir / PDF" }).click();
+  await page.locator("#export-menu").getByRole("button", { name: "Imprimir / PDF" }).click();
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { printedTheme?: string }).printedTheme))
     .toBe("light");
