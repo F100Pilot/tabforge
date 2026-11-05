@@ -237,13 +237,39 @@ def test_corrected_score_moves_tie_continuations_with_the_attack() -> None:
     assert fixed == right
 
 
-def test_corrected_score_skips_when_the_target_string_is_taken() -> None:
+def test_corrected_score_moves_chord_notes_together() -> None:
     chord = {"duration": 1, "notes": [{"string": 6, "fret": 5}, {"string": 5, "fret": 5}]}
     ref = [_ev(0, 5, 0), _ev(0, 4, 0)]  # A2 should be 5/0, D3 should be 4/0
     fixed, applied, skipped = corrected_score(_score([[chord]]), 0, ref)
-    # 6/5 -> 5/0 is blocked (string 5 busy); then 5/5 -> 4/0 is free and goes through.
-    assert (applied, skipped) == (1, 1)
-    assert {(n.string, n.fret) for n in fixed.bars[0].beats[0].notes} == {(6, 5), (4, 0)}
+    # 6/5 -> 5/0 needs string 5, which 5/5 -> 4/0 frees in the same step.
+    assert (applied, skipped) == (2, 0)
+    assert {(n.string, n.fret) for n in fixed.bars[0].beats[0].notes} == {(5, 0), (4, 0)}
+
+
+def test_corrected_score_swaps_two_chord_notes() -> None:
+    # G3 on 4/5 and B3 on 3/4; the correct tab has G3 on 3/0 and B3 on 4/9.
+    chord = {"duration": 1, "notes": [{"string": 4, "fret": 5}, {"string": 3, "fret": 4}]}
+    ref = [_ev(0, 3, 0), _ev(0, 4, 9)]
+    fixed, applied, skipped = corrected_score(_score([[chord]]), 0, ref)
+    assert (applied, skipped) == (2, 0)
+    assert {(n.string, n.fret) for n in fixed.bars[0].beats[0].notes} == {(3, 0), (4, 9)}
+
+
+def test_corrected_score_moves_an_extra_note_out_of_the_way() -> None:
+    # A2 should be 5/0, but the transcription has an extra D3 on 5/5 (not in the correct tab).
+    chord = {"duration": 1, "notes": [{"string": 6, "fret": 5}, {"string": 5, "fret": 5}]}
+    fixed, applied, skipped = corrected_score(_score([[chord]]), 0, [_ev(0, 5, 0)])
+    assert (applied, skipped) == (1, 0)
+    # The extra D3 keeps its pitch on the nearest free string (4/0).
+    assert {(n.string, n.fret) for n in fixed.bars[0].beats[0].notes} == {(5, 0), (4, 0)}
+
+
+def test_corrected_score_skips_when_a_correct_note_holds_the_target_string() -> None:
+    chord = {"duration": 1, "notes": [{"string": 6, "fret": 5}, {"string": 5, "fret": 5}]}
+    ref = [_ev(0, 5, 0), _ev(0, 5, 5)]  # inconsistent: both on string 5; 5/5 is already right
+    fixed, applied, skipped = corrected_score(_score([[chord]]), 0, ref)
+    assert (applied, skipped) == (0, 1)
+    assert {(n.string, n.fret) for n in fixed.bars[0].beats[0].notes} == {(6, 5), (5, 5)}
 
 
 def test_corrected_score_skips_when_a_tie_chain_beat_uses_the_target_string() -> None:
@@ -253,7 +279,8 @@ def test_corrected_score_skips_when_a_tie_chain_beat_uses_the_target_string() ->
         "notes": [{"string": 6, "fret": 5, "tie": True}, {"string": 5, "fret": 3}],
     }
     wrong = _score([[first, second]])
-    fixed, applied, skipped = corrected_score(wrong, 0, [_ev(0, 5, 0)])
+    # 5/3 is right (in the correct tab), so it cannot make room for the held A2.
+    fixed, applied, skipped = corrected_score(wrong, 0, [_ev(0, 5, 0), _ev(2, 5, 3)])
     assert (applied, skipped) == (0, 1)
     assert fixed == wrong
 

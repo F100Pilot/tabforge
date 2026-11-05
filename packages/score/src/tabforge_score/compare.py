@@ -290,6 +290,9 @@ def compare(
     )
 
 
+Cell = tuple[int, int]  # (flat beat index, string)
+
+
 def corrected_score(
     score: Score,
     track: int,
@@ -299,10 +302,13 @@ def corrected_score(
 ) -> tuple[Score, int, int]:
     """Set the strings and frets of `track` to the reference's wherever a matched note differs.
 
-    Tie continuations (same string, following beats with tie=True) move with their attack. A
-    correction is skipped when the target string is already used in any beat of the chain, when
-    the fret is out of range, or when the reference position would sound a different pitch in
-    the track's tuning. Other tracks are untouched. Returns (new score, applied, skipped).
+    A note and its tie continuations (same string, following beats with tie=True) form a chain
+    that moves as one. All corrections are applied together, so chord notes can swap or rotate
+    strings. A note the correct tab does not have ("extra") that holds a target string is moved
+    to the nearest free string with the same pitch. A correction is skipped when the target
+    string stays taken (a correct note, a tie held from an earlier note, or another correction),
+    when the fret is out of range, or when the reference position would sound a different pitch
+    in the track's tuning. Other tracks are untouched. Returns (new score, applied, skipped).
     """
     events = score_events(score, track)  # also validates the track index
     result = comparison or compare(events, reference)
@@ -314,50 +320,113 @@ def corrected_score(
     flat = [(b, i) for b, bar in enumerate(bars) for i in range(len(bar["beats"]))]
     where = {pos: n for n, pos in enumerate(flat)}
 
-    def note_on(n: int, string: int) -> dict[str, Any] | None:
-        b, i = flat[n]
+    # Every chain, keyed by the cell of its attack: its notes and the beats it spans.
+    chains: dict[Cell, list[dict[str, Any]]] = {}
+    span: dict[Cell, range] = {}
+    open_chain: dict[int, Cell] = {}  # string -> chain that the next tie on it continues
+    for n, (b, i) in enumerate(flat):
+        on_beat: dict[int, Cell] = {}
         for note in bars[b]["beats"][i]["notes"]:
-            if note["string"] == string:
-                found: dict[str, Any] = note
-                return found
-        return None
+            string = note["string"]
+            key = open_chain.get(string) if note["tie"] else None
+            if key is None:
+                key = (n, string)
+                chains[key] = []
+            chains[key].append(note)
+            span[key] = range(key[0], n + 1)
+            on_beat[string] = key
+        open_chain = on_beat
 
-    applied = skipped = 0
+    # Valid corrections: chain -> (target string, fret).
+    moves: dict[Cell, tuple[int, int]] = {}
+    skipped = 0
     for diff in result.differences:
         if diff.kind != "position":
             continue
-        first = (
+        start = (
             None
-            if diff.ai_bar is None or diff.ai_beat is None or diff.ai_string is None
+            if diff.ai_bar is None or diff.ai_beat is None
             else where.get((diff.ai_bar - 1, diff.ai_beat))
         )
-        if first is None or diff.ai_string is None or diff.ref_string is None:
+        key = None if start is None or diff.ai_string is None else (start, diff.ai_string)
+        chain = None if key is None else chains.get(key)
+        target, fret = diff.ref_string, diff.ref_fret
+        if (
+            key is None
+            or not chain
+            or chain[0]["tie"]
+            or chain[0]["fret"] != diff.ai_fret
+            or target is None
+            or fret is None
+            or not 1 <= target <= STRING_COUNT
+            or not 0 <= fret <= MAX_FRET
+            or tuning[target - 1] + fret != diff.pitch
+            or key in moves
+        ):
             skipped += 1
             continue
-        start = first
-        head = note_on(start, diff.ai_string)
-        stale = head is None or head["tie"] or head["fret"] != diff.ai_fret
-        chain = [] if head is None or stale else [head]
-        n = start + 1
-        while chain and n < len(flat):
-            nxt = note_on(n, diff.ai_string)
-            if nxt is None or not nxt["tie"]:
-                break
-            chain.append(nxt)
-            n += 1
-        target, fret = diff.ref_string, diff.ref_fret or 0
-        ok = (
-            bool(chain)
-            and diff.ref_fret is not None
-            and 1 <= target <= STRING_COUNT
-            and 0 <= fret <= MAX_FRET
-            and tuning[target - 1] + fret == diff.pitch
-            and all(note_on(m, target) is None for m in range(start, n))
-        )
-        if not ok:
-            skipped += 1
+        moves[key] = (target, fret)
+
+    extras = {
+        (where[(d.ai_bar - 1, d.ai_beat)], d.ai_string)
+        for d in result.differences
+        if d.kind == "extra"
+        and d.ai_bar is not None
+        and d.ai_beat is not None
+        and d.ai_string is not None
+        and (d.ai_bar - 1, d.ai_beat) in where
+    }
+    relocated: dict[Cell, tuple[int, int]] = {}  # extra chain -> (string, fret) out of the way
+
+    def string_of(key: Cell) -> int:
+        if key in moves:
+            return moves[key][0]
+        if key in relocated:
+            return relocated[key][0]
+        return key[1]
+
+    def claims() -> dict[Cell, list[Cell]]:
+        cells: dict[Cell, list[Cell]] = defaultdict(list)
+        for key, beats in span.items():
+            string = string_of(key)
+            for n in beats:
+                cells[(n, string)].append(key)
+        return cells
+
+    def relocate(key: Cell, cells: dict[Cell, list[Cell]]) -> bool:
+        pitch = tuning[key[1] - 1] + chains[key][0]["fret"]
+        free = [
+            s
+            for s in range(1, STRING_COUNT + 1)
+            if s != key[1]
+            and 0 <= pitch - tuning[s - 1] <= MAX_FRET
+            and all(not cells.get((n, s)) for n in span[key])
+        ]
+        if not free:
+            return False
+        best = min(free, key=lambda s: (abs(s - key[1]), s))
+        relocated[key] = (best, pitch - tuning[best - 1])
+        return True
+
+    # Resolve clashes until none is left; every round relocates an extra or drops a correction.
+    while True:
+        cells = claims()
+        clash = next((keys for keys in cells.values() if len(keys) > 1), None)
+        if clash is None:
+            break
+        staying = [k for k in clash if k not in moves]
+        movable = [k for k in staying if k in extras and k not in relocated]
+        if movable and relocate(movable[0], cells):
             continue
-        for note in chain:
-            note["string"], note["fret"] = target, fret
-        applied += 1
-    return Score.model_validate(data), applied, skipped
+        # Drop the correction that started last (a tie from an earlier note keeps its string).
+        moved_in = [k for k in clash if k in moves]
+        drop = max(moved_in) if moved_in else None
+        if drop is None:  # cannot happen: the input itself has no two notes on one cell
+            break
+        del moves[drop]
+        skipped += 1
+
+    for key, (string, fret) in [*moves.items(), *relocated.items()]:
+        for note in chains[key]:
+            note["string"], note["fret"] = string, fret
+    return Score.model_validate(data), len(moves), skipped
