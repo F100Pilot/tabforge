@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     MetaData,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -157,18 +158,28 @@ class TabRevision(Base):
 
 
 class TabReference(Base):
-    """The correct tab of the same song, reduced to note events (ADR-0009). One per tab."""
+    """The correct tab of the same song, reduced to note events (ADR-0009).
+
+    One per tab and track of the tab (ADR-0010); `track` is the name of the track it was read
+    from in the Guitar Pro file, `track_index` the tab's own track it is compared with.
+    """
 
     __tablename__ = "tab_references"
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     tab_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("tabs.id", ondelete="CASCADE"), nullable=False, unique=True
+        ForeignKey("tabs.id", ondelete="CASCADE"), nullable=False
     )
+    track_index: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     filename: Mapped[str] = mapped_column(Text, nullable=False)
     track: Mapped[str] = mapped_column(Text, nullable=False)
     notes: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = _created_at()
+
+    __table_args__ = (
+        UniqueConstraint("tab_id", "track_index", name="uq_tab_references_tab_id_track_index"),
+        CheckConstraint("track_index >= 0", name="track_index_non_negative"),
+    )
 
 
 class Job(Base):

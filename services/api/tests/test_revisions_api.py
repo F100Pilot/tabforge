@@ -131,3 +131,54 @@ def test_preview_validates_and_checks_ownership(client: TestClient, engine: Engi
     assert client.post(f"/v1/tabs/{tab}/preview", json={"score": bad}).status_code == 422
     other, _ = _tab(engine, "other@example.com")
     assert client.post(f"/v1/tabs/{other}/preview", json={"score": _score()}).status_code == 404
+
+
+def _v3() -> dict[str, Any]:
+    def track(name: str, fret: int) -> dict[str, Any]:
+        return {
+            "name": name,
+            "tuning": [64, 59, 55, 50, 45, 40],
+            "bars": [{"beats": [{"duration": 1, "notes": [{"string": 1, "fret": fret}]}]}],
+        }
+
+    return {
+        "schema_version": 3,
+        "tempo_bpm": 100,
+        "time_signature": [4, 4],
+        "tracks": [track("Lead", 12), track("Rhythm", 0)],
+    }
+
+
+def test_v3_revision_with_two_tracks_is_saved_and_read_back(
+    client: TestClient, engine: Engine
+) -> None:
+    tab, base = _tab(engine)
+    resp = client.post(f"/v1/tabs/{tab}/revisions", json={"base_revision_id": base, "score": _v3()})
+    assert resp.status_code == 201, resp.text
+    current = client.get(f"/v1/tabs/{tab}").json()
+    assert current["revision"]["id"] == resp.json()["revision"]["id"]
+    score = current["revision"]["score"]
+    assert score["schema_version"] == 3
+    assert "tuning" not in score and "bars" not in score
+    assert [t["name"] for t in score["tracks"]] == ["Lead", "Rhythm"]
+    assert current["alphatex"].count("\\track ") == 2
+    assert '\\track "Lead"\n\\staff {tabs}\n' in current["alphatex"]
+    assert current["alphatex"].endswith("0.1.1 |")
+    old = client.get(f"/v1/tabs/{tab}/revisions/{resp.json()['revision']['id']}").json()
+    assert old["score"] == score
+
+
+def test_v3_tracks_with_different_bar_counts_are_422(client: TestClient, engine: Engine) -> None:
+    tab, base = _tab(engine)
+    bad = _v3()
+    bad["tracks"][1]["bars"] *= 2
+    resp = client.post(f"/v1/tabs/{tab}/revisions", json={"base_revision_id": base, "score": bad})
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "validation_error"
+
+
+def test_preview_renders_v3(client: TestClient, engine: Engine) -> None:
+    tab, _ = _tab(engine)
+    resp = client.post(f"/v1/tabs/{tab}/preview", json={"score": _v3()})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["alphatex"].count("\\track ") == 2

@@ -1,13 +1,14 @@
 """Reference tab (the correct tab of the same song) and its comparison with the AI tab (ADR-0009).
 
-The browser reads the Guitar Pro file with alphaTab and sends only the notes.
+The browser reads the Guitar Pro file with alphaTab and sends only the notes. A tab keeps one
+reference per track of its score (`?track=N`, 0 by default; ADR-0010).
 """
 
 import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select
 from tabforge_score import Score
@@ -22,6 +23,10 @@ router = APIRouter(prefix="/v1/tabs", tags=["reference"])
 
 MAX_REFERENCE_BYTES = 2_000_000
 MAX_REFERENCE_NOTES = 20_000
+
+# Index of the tab's track (Score.track_list()); v1/v2 scores only have track 0. The upper
+# bound is the Postgres integer column's, so GET/DELETE of any valid index just find nothing.
+TrackQuery = Annotated[int, Query(ge=0, le=2**31 - 1)]
 
 
 async def _limit_body(request: Request) -> None:
@@ -84,25 +89,52 @@ def _out(reference: TabReference) -> ReferenceOut:
     )
 
 
-def _find(session: SessionDep, tab: Tab) -> TabReference | None:
+def _find(session: SessionDep, tab: Tab, track: int) -> TabReference | None:
     return session.execute(
-        select(TabReference).where(TabReference.tab_id == tab.id)
+        select(TabReference).where(TabReference.tab_id == tab.id, TabReference.track_index == track)
     ).scalar_one_or_none()
 
 
 def _not_found() -> ProblemError:
-    return ProblemError(404, "reference_not_found", "this tab has no reference tab")
+    return ProblemError(404, "reference_not_found", "this track of the tab has no reference tab")
+
+
+def _current_score(session: SessionDep, tab: Tab) -> tuple[TabRevision, Score] | None:
+    revision = session.execute(
+        select(TabRevision).where(TabRevision.id == tab.current_revision_id)
+    ).scalar_one_or_none()
+    if revision is None:
+        return None
+    return revision, Score.model_validate(revision.score)
+
+
+def _check_track(score: Score | None, track: int) -> None:
+    """The track must exist in the current revision (a tab without one only has track 0)."""
+    count = 1 if score is None else len(score.track_list())
+    if track >= count:
+        raise ProblemError(
+            422, "invalid_track", f"track {track} does not exist, the tab has {count}"
+        )
 
 
 @router.put("/{tab_id}/reference", dependencies=[Depends(_limit_body), Depends(limit_writes)])
 def put_reference(
-    tab_id: uuid.UUID, body: ReferenceIn, user: CurrentUser, session: SessionDep
+    tab_id: uuid.UUID,
+    body: ReferenceIn,
+    user: CurrentUser,
+    session: SessionDep,
+    track: TrackQuery = 0,
 ) -> ReferenceOut:
-    """Store the reference notes, replacing any previous one (one per tab)."""
+    """Store the reference notes of one track, replacing its previous one."""
     tab = owned_tab(session, user, tab_id, lock=True)  # the lock serializes concurrent PUTs
-    session.execute(delete(TabReference).where(TabReference.tab_id == tab.id))
+    current = _current_score(session, tab)
+    _check_track(None if current is None else current[1], track)
+    session.execute(
+        delete(TabReference).where(TabReference.tab_id == tab.id, TabReference.track_index == track)
+    )
     reference = TabReference(
         tab_id=tab.id,
+        track_index=track,
         filename=body.filename,
         track=body.track,
         notes=[n.model_dump() for n in body.notes],
@@ -114,34 +146,42 @@ def put_reference(
 
 
 @router.get("/{tab_id}/reference")
-def get_reference(tab_id: uuid.UUID, user: CurrentUser, session: SessionDep) -> ReferenceOut:
+def get_reference(
+    tab_id: uuid.UUID, user: CurrentUser, session: SessionDep, track: TrackQuery = 0
+) -> ReferenceOut:
     tab = owned_tab(session, user, tab_id)
-    reference = _find(session, tab)
+    reference = _find(session, tab, track)
     if reference is None:
         raise _not_found()
     return _out(reference)
 
 
 @router.delete("/{tab_id}/reference", status_code=204, dependencies=[Depends(limit_writes)])
-def delete_reference(tab_id: uuid.UUID, user: CurrentUser, session: SessionDep) -> Response:
+def delete_reference(
+    tab_id: uuid.UUID, user: CurrentUser, session: SessionDep, track: TrackQuery = 0
+) -> Response:
     tab = owned_tab(session, user, tab_id)
-    session.execute(delete(TabReference).where(TabReference.tab_id == tab.id))
+    session.execute(
+        delete(TabReference).where(TabReference.tab_id == tab.id, TabReference.track_index == track)
+    )
     return Response(status_code=204)
 
 
 @router.get("/{tab_id}/comparison")
-def get_comparison(tab_id: uuid.UUID, user: CurrentUser, session: SessionDep) -> ComparisonOut:
-    """The tab's current revision against the stored reference notes."""
+def get_comparison(
+    tab_id: uuid.UUID, user: CurrentUser, session: SessionDep, track: TrackQuery = 0
+) -> ComparisonOut:
+    """One track of the tab's current revision against that track's reference notes."""
     tab = owned_tab(session, user, tab_id)
-    reference = _find(session, tab)
+    current = _current_score(session, tab)
+    if current is None:
+        raise ProblemError(404, "not_found", "tab has no revision")
+    revision, score = current
+    _check_track(score, track)
+    reference = _find(session, tab, track)
     if reference is None:
         raise _not_found()
-    revision = session.execute(
-        select(TabRevision).where(TabRevision.id == tab.current_revision_id)
-    ).scalar_one_or_none()
-    if revision is None:
-        raise ProblemError(404, "not_found", "tab has no revision")
-    ai = score_events(Score.model_validate(revision.score))
+    ai = score_events(score, track)
     ref = [NoteEvent(**n) for n in reference.notes]
     result = compare(ai, ref)
 

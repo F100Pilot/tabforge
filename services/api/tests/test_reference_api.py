@@ -62,7 +62,41 @@ def _body(notes: list[dict[str, Any]] | None = None, **overrides: Any) -> dict[s
     return body
 
 
-def _tab(engine: Engine, email: str = "dev@tabforge.local") -> str:
+def _v3_score() -> dict[str, Any]:
+    """Lead = the v2 riff on string 6; Rhythm = other notes, on string 4."""
+    lead = {k: _score()[k] for k in ("tuning", "bars")}
+    rhythm = {
+        "tuning": lead["tuning"],
+        "bars": [
+            {"beats": [{"duration": 2, "notes": [{"string": 4, "fret": 7 + bar}]}] * 2}
+            for bar in range(BARS)
+        ],
+    }
+    return {
+        "schema_version": 3,
+        "tempo_bpm": 100,
+        "time_signature": [4, 4],
+        "tracks": [{"name": "Lead", **lead}, {"name": "Rhythm", **rhythm}],
+    }
+
+
+def _track_notes(track: int) -> list[dict[str, Any]]:
+    events = score_events(Score.model_validate(_v3_score()), track=track)
+    return [
+        {
+            "onset": float(e.onset),
+            "pitch": e.pitch,
+            "string": e.string,
+            "fret": e.fret,
+            "bar": e.bar,
+        }
+        for e in events
+    ]
+
+
+def _tab(
+    engine: Engine, email: str = "dev@tabforge.local", score: dict[str, Any] | None = None
+) -> str:
     with engine.begin() as conn:
         user = conn.execute(
             text(
@@ -71,10 +105,10 @@ def _tab(engine: Engine, email: str = "dev@tabforge.local") -> str:
             ),
             {"e": email},
         ).scalar_one()
-        return _tab_for(conn, str(user))
+        return _tab_for(conn, str(user), score)
 
 
-def _tab_for(conn: Any, user_id: str) -> str:
+def _tab_for(conn: Any, user_id: str, score: dict[str, Any] | None = None) -> str:
     tab = conn.execute(
         text("INSERT INTO tabs (owner_id, title) VALUES (:u, 'T') RETURNING id"), {"u": user_id}
     ).scalar_one()
@@ -83,7 +117,7 @@ def _tab_for(conn: Any, user_id: str) -> str:
             "INSERT INTO tab_revisions (tab_id, score, source) "
             "VALUES (:t, CAST(:s AS jsonb), 'ai') RETURNING id"
         ),
-        {"t": tab, "s": json.dumps(_score())},
+        {"t": tab, "s": json.dumps(_score() if score is None else score)},
     ).scalar_one()
     conn.execute(
         text("UPDATE tabs SET current_revision_id = :r WHERE id = :t"), {"r": rev, "t": tab}
@@ -294,3 +328,80 @@ def test_writes_need_csrf_with_cookie_auth(
     assert auth.put(url, json=_body(), headers=headers).status_code == 200
     assert auth.get(url).status_code == 200  # reads need no token
     assert auth.delete(url, headers=headers).status_code == 204
+
+
+# Per track (ADR-0010) --------------------------------------------------------------------------
+
+
+def test_references_of_tracks_0_and_1_are_independent(client: TestClient, engine: Engine) -> None:
+    tab = _tab(engine, score=_v3_score())
+    url = f"/v1/tabs/{tab}/reference"
+    lead = client.put(url, json=_body(_track_notes(0), filename="lead.gp5"))
+    assert lead.status_code == 200, lead.text
+    rhythm = client.put(f"{url}?track=1", json=_body(_track_notes(1), filename="rhythm.gp5"))
+    assert rhythm.status_code == 200, rhythm.text
+    assert client.get(url).json()["filename"] == "lead.gp5"
+    assert client.get(f"{url}?track=0").json()["filename"] == "lead.gp5"
+    assert client.get(f"{url}?track=1").json()["filename"] == "rhythm.gp5"
+    # Replacing one track's reference leaves the other alone.
+    client.put(f"{url}?track=1", json=_body(_track_notes(1), filename="rhythm2.gp5"))
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT track_index, filename FROM tab_references ORDER BY track_index")
+        ).all()
+    assert [tuple(r) for r in rows] == [(0, "lead.gp5"), (1, "rhythm2.gp5")]
+    assert client.delete(f"{url}?track=1").status_code == 204
+    assert client.get(f"{url}?track=1").status_code == 404
+    assert client.get(url).json()["filename"] == "lead.gp5"
+
+
+def test_comparison_of_track_1_compares_the_rhythm_track(
+    client: TestClient, engine: Engine
+) -> None:
+    tab = _tab(engine, score=_v3_score())
+    client.put(f"/v1/tabs/{tab}/reference?track=1", json=_body(_track_notes(1)))
+    body = client.get(f"/v1/tabs/{tab}/comparison?track=1").json()
+    assert body["ai_notes"] == body["reference_notes"] == body["matched"] == 2 * BARS
+    assert body["recall"] == body["precision"] == 1
+    # Track 0 has no reference of its own.
+    resp = client.get(f"/v1/tabs/{tab}/comparison")
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "reference_not_found"
+
+
+def test_comparison_of_track_0_uses_the_lead_track(client: TestClient, engine: Engine) -> None:
+    tab = _tab(engine, score=_v3_score())
+    client.put(f"/v1/tabs/{tab}/reference?track=0", json=_body(_track_notes(1)))
+    body = client.get(f"/v1/tabs/{tab}/comparison?track=0").json()
+    assert body["ai_notes"] == BARS * len(PITCHES)  # the Lead notes
+    assert body["matched"] == 0  # the Rhythm notes are not in the Lead track
+
+
+@pytest.mark.parametrize(
+    ("score", "track"), [(None, 1), (_v3_score(), 2), (_v3_score(), 9), (None, 2**31 - 1)]
+)
+def test_track_beyond_the_current_revision_is_422(
+    client: TestClient, engine: Engine, score: dict[str, Any] | None, track: int
+) -> None:
+    tab = _tab(engine, score=score)
+    put = client.put(f"/v1/tabs/{tab}/reference?track={track}", json=_body())
+    assert put.status_code == 422
+    assert put.json()["code"] == "invalid_track"
+    comparison = client.get(f"/v1/tabs/{tab}/comparison?track={track}")
+    assert comparison.status_code == 422
+    assert comparison.json()["code"] == "invalid_track"
+    # Reading or deleting just uses the index.
+    assert client.get(f"/v1/tabs/{tab}/reference?track={track}").status_code == 404
+    assert client.delete(f"/v1/tabs/{tab}/reference?track={track}").status_code == 204
+
+
+@pytest.mark.parametrize("track", ["-1", "x", "1.5", str(2**31), str(10**20)])
+def test_track_must_be_a_non_negative_integer(
+    client: TestClient, engine: Engine, track: str
+) -> None:
+    tab = _tab(engine)
+    url = f"/v1/tabs/{tab}/reference?track={track}"
+    assert client.put(url, json=_body()).status_code == 422
+    assert client.get(url).status_code == 422
+    assert client.delete(url).status_code == 422
+    assert client.get(f"/v1/tabs/{tab}/comparison?track={track}").status_code == 422

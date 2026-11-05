@@ -62,7 +62,7 @@ erDiagram
   AUDIO_ASSET ||--o{ JOB : processed_by
   JOB ||--o| TAB : produces
   TAB ||--o{ TAB_REVISION : has
-  TAB ||--o| TAB_REFERENCE : compared_with
+  TAB ||--o{ TAB_REFERENCE : compared_with
   USER ||--o{ SESSION : has
   USER { uuid id; text email; timestamptz created_at; timestamptz deleted_at }
   SESSION { uuid id; uuid user_id; text token_hash; text csrf_token; timestamptz expires_at }
@@ -71,7 +71,7 @@ erDiagram
   JOB { uuid id; uuid audio_id; text status; text stage; int attempts; text error_code; timestamptz locked_at; uuid tab_id }
   TAB { uuid id; uuid owner_id; text title; text tuning; text visibility; uuid current_revision_id }
   TAB_REVISION { uuid id; uuid tab_id; jsonb score; text source; timestamptz created_at }
-  TAB_REFERENCE { uuid id; uuid tab_id; text filename; text track; jsonb notes; timestamptz created_at }
+  TAB_REFERENCE { uuid id; uuid tab_id; int track_index; text filename; text track; jsonb notes; timestamptz created_at }
 ```
 
 - `AUDIO_ASSET.status`: `pending_upload | uploaded | rejected`; `source_kind`: `mix | guitar_stem` (escolha do utilizador no upload).
@@ -80,8 +80,8 @@ erDiagram
 - Fila: o worker reclama o job `queued` mais antigo (ou `running` com lease expirado) com `FOR UPDATE SKIP LOCKED`; cada etapa renova `locked_at`. Acima de 3 tentativas o job falha com `max_attempts_exceeded`; erro numa etapa → `failed` com `<etapa>_failed`.
 - Schema: migrações Alembic em `services/api/migrations` (a API é dona do schema; o worker usa SQL via psycopg).
 - `TAB.visibility`: `private` (default) `| unlisted | public` (public desativado até ADR-0003 ser fechado).
-- `TAB_REVISION` imutável; `source`: `ai | user`.
-- `TAB_REFERENCE` (ADR-0009): no máximo uma por tab (`tab_id` único); `notes` é uma lista JSONB de `{onset (semínimas), pitch, string (1 = mais aguda), fret, bar}`. Só ficam as notas, nunca o ficheiro Guitar Pro. Apaga-se em cascata com a tab.
+- `TAB_REVISION` imutável; `source`: `ai | user`. `score`: Score v1/v2 (uma pista) ou v3 (`tracks`: 1 a 4 pistas com `name`, `tuning`, `bars`, `warnings`, todas com o mesmo número de compassos; ADR-0010). O worker ainda grava v2.
+- `TAB_REFERENCE` (ADR-0009, ADR-0010): no máximo uma por pista da tab (`tab_id` + `track_index` únicos; `track_index` ≥ 0 é o índice da pista no score, 0 em v1/v2 e nas referências anteriores à migração 0006); `track` é o nome da pista no ficheiro Guitar Pro; `notes` é uma lista JSONB de `{onset (semínimas), pitch, string (1 = mais aguda), fret, bar}`. Só ficam as notas, nunca o ficheiro Guitar Pro. Apaga-se em cascata com a tab.
 - `LOGIN_TOKEN` e `SESSION` (US-07, ADR-0006) guardam só o SHA-256 do segredo. `SESSION` e todo o conteúdo do utilizador apagam-se em cascata com `USER`; `LOGIN_TOKEN` não tem FK (existe antes do utilizador) e é apagado pelo email. O worker remove os expirados de hora a hora.
 
 ## Contrato de API (rascunho)
@@ -96,12 +96,13 @@ erDiagram
 | `POST` | `/v1/uploads` | `{content_type, size_bytes, source_kind}` → URL pré-assinado (PUT, assina `Content-Type` e `Content-Length`, ≤ 5 min) + `audio_id`; 413/415 |
 | `POST` | `/v1/uploads/{id}/complete` | Confirma tamanho e magic bytes (se não coincidirem: apaga, 415); cria job `queued` |
 | `GET` | `/v1/jobs/{id}` | Estado + etapa |
-| `GET` | `/v1/tabs/{id}` | Tab + revisão atual (score) + alphaTex gerado no servidor |
-| `POST` | `/v1/tabs/{id}/revisions` | Nova revisão (edição) |
-| `PUT` | `/v1/tabs/{id}/reference` | Só do dono. Guarda a tab certa como notas (ADR-0009): `{filename, track, notes: [{onset, pitch, string, fret, bar}]}` (1–20 000 notas, corpo ≤ 2 MB); substitui a anterior → 200 `{filename, track, notes, created_at}`; 413/422 |
-| `GET` | `/v1/tabs/{id}/reference` | Resumo da tab certa; 404 `reference_not_found` |
-| `DELETE` | `/v1/tabs/{id}/reference` | 204 (idempotente) |
-| `GET` | `/v1/tabs/{id}/comparison` | Compara a revisão atual com a tab certa: deslocamento, escala, recall, precision, F1, posição correta, erro de ataque e resultados por compasso; 404 `reference_not_found` |
+| `GET` | `/v1/tabs/{id}` | Tab + revisão atual (score v1/v2/v3) + alphaTex gerado no servidor (v3: `\track` por pista) |
+| `POST` | `/v1/tabs/{id}/revisions` | Nova revisão (edição); aceita Score v1/v2/v3 |
+| `POST` | `/v1/tabs/{id}/preview` | `{score}` → `{alphatex}` sem gravar (o editor redesenha a partir daqui) |
+| `PUT` | `/v1/tabs/{id}/reference?track=N` | Só do dono. Guarda a tab certa da pista `N` (inteiro ≥ 0, por defeito 0; ADR-0010) como notas (ADR-0009): `{filename, track, notes: [{onset, pitch, string, fret, bar}]}` (1–20 000 notas, corpo ≤ 2 MB); substitui a anterior dessa pista → 200 `{filename, track, notes, created_at}`; 422 `invalid_track` se a revisão atual não tem a pista `N`; 413/422 |
+| `GET` | `/v1/tabs/{id}/reference?track=N` | Resumo da tab certa da pista `N` (por defeito 0); 404 `reference_not_found` |
+| `DELETE` | `/v1/tabs/{id}/reference?track=N` | Apaga a da pista `N` (por defeito 0); 204 (idempotente) |
+| `GET` | `/v1/tabs/{id}/comparison?track=N` | Compara a pista `N` (por defeito 0) da revisão atual com a tab certa dessa pista: deslocamento, escala, recall, precision, F1, posição correta, erro de ataque e resultados por compasso; 422 `invalid_track` se a revisão atual não tem a pista `N`; 404 `reference_not_found` |
 | `GET` | `/health`, `/ready` | Liveness / readiness |
 | `POST` | `/v1/auth/desktop` | Só `env=desktop` (senão 404): `{token}` → 200 `{user, csrf_token}` + cookie de sessão; 403 `invalid_launch_token`; 429 `rate_limited` (10/min por IP) |
 | `PUT` | `/v1/local-storage/{key}` | Só com storage `local`: upload assinado (`expires`, `sig`) → 200 sem corpo; 403 `invalid_signature`/`upload_url_expired`; 400 `invalid_key`/`upload_size_mismatch`; 411 `length_required` |
@@ -165,3 +166,5 @@ Aplicação Windows para um só utilizador, sem servidor. Os mesmos serviços co
 - [ADR-0006](adr/0006-autenticacao.md) — Autenticação: link mágico por email e sessões opacas no servidor
 - [ADR-0007](adr/0007-export-no-browser.md) — Export Guitar Pro e MIDI no browser com o alphaTab
 - [ADR-0008](adr/0008-aplicacao-desktop-windows.md) — Aplicação desktop para Windows (uso pessoal, só CPU)
+- [ADR-0009](adr/0009-comparacao-com-tab-certa.md) — Comparação com a tab certa dentro do TabForge
+- [ADR-0010](adr/0010-pautas-lead-e-rhythm.md) — Pautas Lead e Rhythm (Score v3 com pistas)
