@@ -81,7 +81,7 @@ jobs:
           & $iscc packaging\installer.iss
           Get-Item dist\TabForge-Setup.exe | Select-Object Name, Length
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: env.PACKAGE == 'true'
         with:
           name: TabForge-Setup
