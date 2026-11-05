@@ -44,7 +44,7 @@ start.bat
 - Cada `start.bat` faz `git pull`, atualiza as dependências, recompila a interface só se mudou e abre o TabForge numa janela.
 - `start.bat --smoke` corre um autoteste sem janela (uma transcrição real).
 - Dados (base de dados, áudio, registos): `%LOCALAPPDATA%\TabForge`. Não saem do PC.
-- O instalador `TabForge-Setup.exe` é gerado pelo workflow `Desktop (Windows)` como artefacto.
+- O instalador `TabForge-Setup.exe` é gerado pelo workflow `Desktop (Windows)` como artefacto, só a pedido ("Run workflow"; ADR-0012). Em cada push o CI testa o `start.bat`.
 
 ## Qualidade
 

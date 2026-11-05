@@ -30,7 +30,7 @@
 - **Janela:** `pywebview` (BSD-3) sobre o Edge WebView2, que já vem no Windows 10/11; se falhar, abre o browser predefinido.
 - **ffmpeg:** build LGPL para Windows, com checksum fixado.
 - **Empacotamento:** PyInstaller (`--onedir`) + Inno Setup → `TabForge-Setup.exe`, artefacto do CI. Sem assinatura de código e sem atualizações automáticas (uso pessoal: o aviso do SmartScreen é aceite).
-- **CI:** job `windows-latest` que constrói o instalador e faz um smoke test ao programa empacotado sem janela: arranca o Postgres, migra, carrega um WAV pela API, espera pela tab e desliga tudo.
+- **CI** (alterado pelo ADR-0012: o instalador passa a ser só a pedido): job `windows-latest` que constrói o instalador e faz um smoke test ao programa empacotado sem janela: arranca o Postgres, migra, carrega um WAV pela API, espera pela tab e desliga tudo.
 
 ## Consequências
 

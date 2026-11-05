@@ -177,3 +177,4 @@ Aplicação Windows para um só utilizador, sem servidor. Os mesmos serviços co
 - [ADR-0009](adr/0009-comparacao-com-tab-certa.md) — Comparação com a tab certa dentro do TabForge
 - [ADR-0010](adr/0010-pautas-lead-e-rhythm.md) — Pautas Lead e Rhythm (Score v3 com pistas)
 - [ADR-0011](adr/0011-aprender-com-as-tabs-certas.md) — Aprender a escolha de corda/traste com as tabs certas e as correções
+- [ADR-0012](adr/0012-instalador-so-a-pedido.md) — Instalador Windows só a pedido; em cada push testa-se o start.bat
