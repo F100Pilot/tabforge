@@ -63,6 +63,12 @@ describe("referenceProblemMessage", () => {
     expect(referenceProblemMessage(p(404))).toMatch(/já não existe/);
     expect(referenceProblemMessage(new Error("x"))).toBe("Não foi possível comparar a tablatura.");
   });
+  it("tells an outdated API (no such route) apart from a deleted tab", () => {
+    const route = new ProblemError({ status: 404, code: "not_found", title: "", detail: "Not Found" });
+    expect(referenceProblemMessage(route)).toMatch(/start\.bat/);
+    const ref = new ProblemError({ status: 404, code: "reference_not_found", title: "", detail: "x" });
+    expect(referenceProblemMessage(ref)).toMatch(/não tem tab certa/);
+  });
 });
 
 const d = (over: Partial<Difference>): Difference => ({

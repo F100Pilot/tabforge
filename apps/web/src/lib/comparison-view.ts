@@ -39,6 +39,12 @@ export function referenceProblemMessage(err: unknown): string {
   if (err instanceof ProblemError) {
     if (err.status === 413) return "A tab certa é demasiado grande. Escolha outra pista ou um ficheiro mais curto.";
     if (err.status === 422) return "A tab certa não é válida (sem notas ou notas fora do limite).";
+    // Starlette's own 404 for an unknown route: the API predates the comparison (desktop
+    // started from an older checkout), not a deleted tab.
+    if (err.status === 404 && err.message === "Not Found") {
+      return "A aplicação está desatualizada. Feche o TabForge e corra o start.bat outra vez.";
+    }
+    if (err.code === "reference_not_found") return "Esta pista ainda não tem tab certa guardada.";
     if (err.status === 404) return "A tablatura já não existe.";
     if (err.status === 401) return "A sessão expirou. Entre outra vez.";
     return err.message;
