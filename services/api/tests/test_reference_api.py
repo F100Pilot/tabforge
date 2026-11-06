@@ -499,6 +499,7 @@ def test_apply_corrects_positions_in_a_new_current_revision(
     assert resp.status_code == 201, resp.text
     body = resp.json()
     assert (body["applied"], body["skipped"]) == (MOVED, 0)
+    assert body["retuned_to"] is None
     revision = body["tab"]["revision"]
     assert revision["id"] != base and revision["source"] == "user"
     assert body["tab"]["id"] == tab and "alphatex" in body["tab"]
@@ -524,6 +525,28 @@ def test_apply_with_nothing_to_correct_creates_no_revision(
     assert (resp.json()["applied"], resp.json()["skipped"]) == (0, 0)
     assert resp.json()["tab"]["revision"]["id"] == base
     assert len(client.get(f"/v1/tabs/{tab}/revisions").json()["items"]) == 1
+
+
+def test_comparison_and_apply_handle_a_reference_in_another_tuning(
+    client: TestClient, engine: Engine
+) -> None:
+    tab = _tab(engine)
+    # The correct tab plays the same pitches in Drop D: string 6 is two semitones lower.
+    drop_d = [{**n, "fret": n["fret"] + 2} for n in _notes()]
+    client.put(f"/v1/tabs/{tab}/reference", json=_body(drop_d))
+    before = client.get(f"/v1/tabs/{tab}/comparison").json()
+    assert before["position_accuracy"] == 0
+    assert before["tab_tuning"] == [64, 59, 55, 50, 45, 40]
+    assert before["reference_tuning"] == [64, 59, 55, 50, 45, 38]
+    assert (before["tab_tuning_name"], before["reference_tuning_name"]) == ("E standard", "Drop D")
+    resp = _apply(client, tab, _rev(client, tab))
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["retuned_to"] == "Drop D"
+    assert body["tab"]["tuning"] == "Drop D"
+    after = client.get(f"/v1/tabs/{tab}/comparison").json()
+    assert after["position_accuracy"] == 1
+    assert after["tab_tuning_name"] == "Drop D"
 
 
 def test_apply_on_track_1_leaves_track_0_alone(client: TestClient, engine: Engine) -> None:

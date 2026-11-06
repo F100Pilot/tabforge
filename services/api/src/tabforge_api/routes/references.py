@@ -12,7 +12,14 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select
 from tabforge_score import Score
-from tabforge_score.compare import NoteEvent, compare, corrected_score, score_events
+from tabforge_score.compare import (
+    NoteEvent,
+    compare,
+    corrected_score,
+    reference_tuning,
+    score_events,
+    tuning_name,
+)
 
 from tabforge_api.deps import CurrentUser, SessionDep, limit_writes
 from tabforge_api.models import Tab, TabReference, TabRevision
@@ -116,6 +123,12 @@ class ComparisonOut(BaseModel):
     onset_error: float | None
     bars: list[BarOut]
     differences: DifferencesOut
+    # Tunings, string 1 (high) first, and their names ("E standard", "Drop D"...). When they
+    # differ, positions cannot match; applying the corrections retunes the track.
+    tab_tuning: list[int]
+    reference_tuning: list[int]
+    tab_tuning_name: str
+    reference_tuning_name: str
 
 
 def _out(reference: TabReference) -> ReferenceOut:
@@ -227,6 +240,8 @@ def get_comparison(
     ai = score_events(score, track)
     ref = [NoteEvent(**n) for n in reference.notes]
     result = compare(ai, ref)
+    tab_tuning = list(score.track_list()[track].tuning)
+    ref_tuning = reference_tuning(ref, tab_tuning)
 
     def r(value: float | None) -> float | None:
         return None if value is None else round(value, 4)
@@ -280,6 +295,10 @@ def get_comparison(
             items=items,
             truncated=len(result.differences) > MAX_DIFFERENCES,
         ),
+        tab_tuning=tab_tuning,
+        reference_tuning=ref_tuning,
+        tab_tuning_name=tuning_name(tab_tuning),
+        reference_tuning_name=tuning_name(ref_tuning),
     )
 
 
@@ -294,6 +313,7 @@ class ApplyOut(BaseModel):
     tab: TabOut
     applied: int
     skipped: int
+    retuned_to: str | None = None  # the track took the correct tab's tuning (its name)
 
 
 @router.post("/{tab_id}/comparison/apply", status_code=201, dependencies=[Depends(limit_writes)])
@@ -326,14 +346,24 @@ def apply_comparison(
     fixed, applied, skipped = corrected_score(
         score, track, [NoteEvent(**n) for n in reference.notes]
     )
-    if applied == 0:
+    new_tuning = fixed.track_list()[track].tuning
+    retuned = new_tuning != score.track_list()[track].tuning
+    if applied == 0 and not retuned:
         response.status_code = 200
         return ApplyOut(tab=_tab_out(tab, revision), applied=0, skipped=skipped)
     created = TabRevision(tab_id=tab.id, score=fixed.model_dump(mode="json"), source="user")
     session.add(created)
     session.flush()
     tab.current_revision_id = created.id
+    tunings = {tuple(t.tuning) for t in fixed.track_list()}
+    if retuned and len(tunings) == 1:  # the tab's tuning label (one tuning for all tracks)
+        tab.tuning = tuning_name(new_tuning)
     session.flush()
     session.refresh(created)
     mark_stale(session, user.id)
-    return ApplyOut(tab=_tab_out(tab, created), applied=applied, skipped=skipped)
+    return ApplyOut(
+        tab=_tab_out(tab, created),
+        applied=applied,
+        skipped=skipped,
+        retuned_to=tuning_name(new_tuning) if retuned else None,
+    )
