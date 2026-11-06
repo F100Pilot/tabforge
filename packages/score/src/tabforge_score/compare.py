@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import Any, Literal
 
-from tabforge_score.model import MAX_FRET, STRING_COUNT, Score, beat_value
+from tabforge_score.model import MAX_FRET, STRING_COUNT, Score, beat_value, midi_to_note_name
 
 TOLERANCE = 0.25  # quarter notes: a sixteenth either way counts as the same attack
 MAX_SHIFT = 256.0  # quarter notes (64 bars of 4/4) of intro or offset
@@ -290,6 +290,37 @@ def compare(
     )
 
 
+STANDARD_TUNING = (64, 59, 55, 50, 45, 40)  # string 1 (high E) first
+_FLAT_NAMES = ("C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B")
+
+
+def reference_tuning(reference: Iterable[NoteEvent], fallback: Sequence[int]) -> list[int]:
+    """The tuning the correct tab is in, read from its notes (pitch - fret on each string).
+
+    A string whose notes disagree (inconsistent data) is not read. Strings without a reading
+    follow the others when at least two strings agree on one shift from `fallback` (D standard,
+    Eb standard...); otherwise they keep `fallback`'s note.
+    """
+    seen: dict[int, Counter[int]] = defaultdict(Counter)
+    for e in reference:
+        if 1 <= e.string <= STRING_COUNT:
+            seen[e.string][e.pitch - e.fret] += 1
+    known = {s: next(iter(c)) for s, c in seen.items() if len(c) == 1}
+    shifts = {known[s] - fallback[s - 1] for s in known}
+    shift = shifts.pop() if len(shifts) == 1 and len(known) >= 2 else 0
+    return [known.get(s, fallback[s - 1] + shift) for s in range(1, STRING_COUNT + 1)]
+
+
+def tuning_name(tuning: Sequence[int]) -> str:
+    """'E standard', 'D standard', 'Drop D'..., else the notes from the low string up."""
+    shifts = [t - s for t, s in zip(tuning, STANDARD_TUNING, strict=True)]
+    if len(set(shifts)) == 1 and -11 <= shifts[0] <= 0:
+        return f"{_FLAT_NAMES[tuning[0] % 12]} standard"
+    if len(set(shifts[:5])) == 1 and shifts[5] == shifts[0] - 2 and -11 <= shifts[0] <= 0:
+        return f"Drop {_FLAT_NAMES[tuning[5] % 12]}"
+    return " ".join(midi_to_note_name(m) for m in reversed(tuning))
+
+
 Cell = tuple[int, int]  # (flat beat index, string)
 
 
@@ -309,14 +340,33 @@ def corrected_score(
     string stays taken (a correct note, a tie held from an earlier note, or another correction),
     when the fret is out of range, or when the reference position would sound a different pitch
     in the track's tuning. Other tracks are untouched. Returns (new score, applied, skipped).
+
+    When the correct tab is in another tuning (`reference_tuning`), the track takes that tuning
+    and every other note keeps its pitch on its string, or moves to the nearest free string where
+    it fits; if one cannot be placed, the tuning stays as it was.
     """
     events = score_events(score, track)  # also validates the track index
     result = comparison or compare(events, reference)
-    tuning = score.track_list()[track].tuning
+    old_tuning = list(score.track_list()[track].tuning)
+    new_tuning = reference_tuning(reference, old_tuning)
+    if new_tuning != old_tuning:
+        retuned = _corrected(score, track, result, new_tuning)
+        if retuned is not None:
+            return retuned
+    plan = _corrected(score, track, result, old_tuning)
+    if plan is None:  # cannot happen: in its own tuning every note already has a place
+        raise AssertionError("no placement in the track's own tuning")
+    return plan
+
+
+def _corrected(
+    score: Score, track: int, result: Comparison, tuning: list[int]
+) -> tuple[Score, int, int] | None:
+    """`corrected_score` in `tuning`; None if a note cannot be placed in it."""
+    old_tuning = list(score.track_list()[track].tuning)
     data: dict[str, Any] = score.model_dump(mode="json")
-    bars: list[dict[str, Any]] = (
-        data["tracks"][track]["bars"] if score.schema_version == 3 else data["bars"]
-    )
+    holder: dict[str, Any] = data["tracks"][track] if score.schema_version == 3 else data
+    bars: list[dict[str, Any]] = holder["bars"]
     flat = [(b, i) for b, bar in enumerate(bars) for i in range(len(bar["beats"]))]
     where = {pos: n for n, pos in enumerate(flat)}
 
@@ -336,6 +386,12 @@ def corrected_score(
             span[key] = range(key[0], n + 1)
             on_beat[string] = key
         open_chain = on_beat
+
+    def pitch_of(key: Cell) -> int:
+        return old_tuning[key[1] - 1] + int(chains[key][0]["fret"])
+
+    def fits(key: Cell, string: int) -> bool:
+        return 0 <= pitch_of(key) - tuning[string - 1] <= MAX_FRET
 
     # Valid corrections: chain -> (target string, fret).
     moves: dict[Cell, tuple[int, int]] = {}
@@ -376,14 +432,12 @@ def corrected_score(
         and d.ai_string is not None
         and (d.ai_bar - 1, d.ai_beat) in where
     }
-    relocated: dict[Cell, tuple[int, int]] = {}  # extra chain -> (string, fret) out of the way
+    relocated: dict[Cell, int] = {}  # chain -> another string where it keeps its pitch
 
     def string_of(key: Cell) -> int:
         if key in moves:
             return moves[key][0]
-        if key in relocated:
-            return relocated[key][0]
-        return key[1]
+        return relocated.get(key, key[1])
 
     def claims() -> dict[Cell, list[Cell]]:
         cells: dict[Cell, list[Cell]] = defaultdict(list)
@@ -394,19 +448,20 @@ def corrected_score(
         return cells
 
     def relocate(key: Cell, cells: dict[Cell, list[Cell]]) -> bool:
-        pitch = tuning[key[1] - 1] + chains[key][0]["fret"]
         free = [
             s
             for s in range(1, STRING_COUNT + 1)
-            if s != key[1]
-            and 0 <= pitch - tuning[s - 1] <= MAX_FRET
-            and all(not cells.get((n, s)) for n in span[key])
+            if s != key[1] and fits(key, s) and all(not cells.get((n, s)) for n in span[key])
         ]
         if not free:
             return False
-        best = min(free, key=lambda s: (abs(s - key[1]), s))
-        relocated[key] = (best, pitch - tuning[best - 1])
+        relocated[key] = min(free, key=lambda s: (abs(s - key[1]), s))
         return True
+
+    # In another tuning, a note that no longer fits on its string must move first.
+    for key in chains:
+        if key not in moves and not fits(key, key[1]) and not relocate(key, claims()):
+            return None
 
     # Resolve clashes until none is left; every round relocates an extra or drops a correction.
     while True:
@@ -420,13 +475,18 @@ def corrected_score(
             continue
         # Drop the correction that started last (a tie from an earlier note keeps its string).
         moved_in = [k for k in clash if k in moves]
-        drop = max(moved_in) if moved_in else None
-        if drop is None:  # cannot happen: the input itself has no two notes on one cell
-            break
+        if not moved_in:  # two staying notes: only possible after a misfit moved in
+            return None
+        drop = max(moved_in)
         del moves[drop]
         skipped += 1
+        if not fits(drop, drop[1]) and not relocate(drop, claims()):
+            return None
 
-    for key, (string, fret) in [*moves.items(), *relocated.items()]:
-        for note in chains[key]:
+    for key, notes in chains.items():
+        string = string_of(key)
+        fret = moves[key][1] if key in moves else pitch_of(key) - tuning[string - 1]
+        for note in notes:
             note["string"], note["fret"] = string, fret
+    holder["tuning"] = list(tuning)
     return Score.model_validate(data), len(moves), skipped

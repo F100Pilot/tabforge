@@ -5,7 +5,14 @@ from fractions import Fraction
 import pytest
 
 from tabforge_score import Score
-from tabforge_score.compare import NoteEvent, compare, corrected_score, score_events
+from tabforge_score.compare import (
+    NoteEvent,
+    compare,
+    corrected_score,
+    reference_tuning,
+    score_events,
+    tuning_name,
+)
 
 STANDARD = [64, 59, 55, 50, 45, 40]  # string 1 (high E) first
 
@@ -289,9 +296,13 @@ def test_corrected_score_skips_fret_out_of_range_and_pitch_changes() -> None:
     wrong = _score([_pad(_q(6, 5), _q(6, 7))])
     high = NoteEvent(onset=0, pitch=45, string=5, fret=0)
     low = NoteEvent(onset=1, pitch=47, string=4, fret=-3)  # impossible fret
-    other = NoteEvent(onset=1, pitch=47, string=5, fret=0)  # 5/0 is 45, not 47
     assert corrected_score(wrong, 0, [high, low])[1:] == (1, 1)
-    assert corrected_score(wrong, 0, [other])[1:] == (0, 1)
+    # A2 at 5/0 (high) and B2 at 5/0 (other) disagree: the string-5 tuning cannot be told,
+    # so the track keeps E standard and B2 cannot go to 5/0.
+    other = NoteEvent(onset=1, pitch=47, string=5, fret=0)
+    fixed, applied, skipped = corrected_score(wrong, 0, [high, other])
+    assert fixed.tuning == STANDARD
+    assert (applied, skipped) == (1, 1)
 
 
 def test_corrected_score_in_v3_only_changes_the_chosen_track() -> None:
@@ -319,3 +330,57 @@ def test_a_corrected_score_compares_perfectly() -> None:
     reference = _reference(_score([[_q(5, 0), _q(4, 0), _q(4, 2), _q(3, 0)]]))
     fixed, _, _ = corrected_score(wrong, 0, reference)
     assert compare(score_events(fixed), reference).position_accuracy == 1
+
+
+# tunings ---------------------------------------------------------------------------------------
+
+D_STANDARD = [t - 2 for t in STANDARD]
+
+
+def _ev_in(tuning: list[int], onset: float, string: int, fret: int) -> NoteEvent:
+    return NoteEvent(onset=onset, pitch=tuning[string - 1] + fret, string=string, fret=fret)
+
+
+def test_reference_tuning_is_read_from_the_notes() -> None:
+    ref = [_ev_in(D_STANDARD, 0, 6, 0), _ev_in(D_STANDARD, 1, 5, 2), _ev_in(D_STANDARD, 2, 3, 4)]
+    # Strings 1, 2 and 4 have no notes: they follow the same shift as the others (-2).
+    assert reference_tuning(ref, STANDARD) == D_STANDARD
+
+
+def test_reference_tuning_keeps_a_drop_tuning() -> None:
+    drop_d = [*STANDARD[:5], 38]
+    ref = [_ev_in(drop_d, 0, 6, 0), _ev_in(drop_d, 1, 5, 0), _ev_in(drop_d, 2, 4, 0)]
+    assert reference_tuning(ref, STANDARD) == drop_d
+    assert reference_tuning([], STANDARD) == STANDARD
+
+
+def test_tuning_name() -> None:
+    assert tuning_name(STANDARD) == "E standard"
+    assert tuning_name(D_STANDARD) == "D standard"
+    assert tuning_name([t - 1 for t in STANDARD]) == "Eb standard"
+    assert tuning_name([*STANDARD[:5], 38]) == "Drop D"
+    assert tuning_name([*D_STANDARD[:5], 36]) == "Drop C"
+    assert tuning_name([64, 59, 55, 50, 45, 43]) == "G2 A2 D3 G3 B3 E4"  # low to high
+
+
+def test_corrected_score_takes_the_tuning_of_the_correct_tab() -> None:
+    # The transcription is in E standard; the correct tab plays the same notes in D standard.
+    wrong = _score([_pad(_q(6, 5), _q(5, 7), _q(1, 0))])  # A2, E3, E4
+    ref = [_ev_in(D_STANDARD, 0, 6, 7), _ev_in(D_STANDARD, 1, 4, 4)]  # A2 on 6/7, E3 on 4/4
+    fixed, applied, skipped = corrected_score(wrong, 0, ref)
+    assert (applied, skipped) == (2, 0)
+    assert fixed.tuning == D_STANDARD
+    beats = fixed.bars[0].beats
+    assert [(n.string, n.fret) for b in beats[:3] for n in b.notes] == [(6, 7), (4, 4), (1, 2)]
+    # Every note still sounds the same.
+    assert [e.pitch for e in score_events(fixed, 0)] == [e.pitch for e in score_events(wrong, 0)]
+    assert compare(score_events(fixed, 0), ref).position_accuracy == 1.0
+
+
+def test_corrected_score_keeps_the_tuning_when_a_note_has_nowhere_to_go() -> None:
+    # The correct tab is tuned up a tone; the extra open low E (40) cannot be played there.
+    up = [t + 2 for t in STANDARD]
+    wrong = _score([_pad(_q(6, 0), _q(5, 7))])  # E2 (extra), E3
+    fixed, applied, skipped = corrected_score(wrong, 0, [_ev_in(up, 1, 5, 5), _ev_in(up, 2, 4, 0)])
+    assert fixed.tuning == STANDARD
+    assert (applied, skipped) == (0, 1)  # 5/5 in the old tuning is not E3
