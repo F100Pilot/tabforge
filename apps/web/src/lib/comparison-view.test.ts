@@ -17,6 +17,8 @@ const base: Comparison = {
   onset_error: null,
   bars: [],
   differences: { counts: { position: 0, missing: 0, extra: 0, timing: 0 }, items: [], truncated: false },
+  tab_tuning_name: "E standard",
+  reference_tuning_name: "E standard",
 };
 
 describe("formatters", () => {
@@ -40,6 +42,12 @@ describe("alignmentNotes", () => {
   it("reports a doubled or halved tempo", () => {
     expect(alignmentNotes({ ...base, scale: 0.5 })).toEqual(["Andamento detetado ao dobro."]);
     expect(alignmentNotes({ ...base, scale: 2 })).toEqual(["Andamento detetado a metade."]);
+  });
+  it("reports a correct tab in another tuning", () => {
+    expect(alignmentNotes({ ...base, reference_tuning_name: "B standard" })).toEqual([
+      "A tab certa está em B standard e esta em E standard: as posições só coincidem depois de aplicar as correções, que mudam a afinação.",
+    ]);
+    expect(alignmentNotes({ ...base, tab_tuning_name: null, reference_tuning_name: null })).toEqual([]);
   });
 });
 
@@ -115,6 +123,7 @@ describe("apply messages", () => {
     expect(applyResultMessage(1, 1)).toBe("Corrigida 1 posição (1 ignorada: corda ocupada)");
     expect(applyResultMessage(3, 0)).toBe("Corrigidas 3 posições");
     expect(applyResultMessage(0, 4)).toBe("Nenhuma posição corrigida (4 ignoradas: corda ocupada)");
+    expect(applyResultMessage(380, 0, "B standard")).toBe("Corrigidas 380 posições. Afinação mudada para B standard.");
   });
   it("conflict", () => {
     expect(conflictMessage(new ProblemError({ status: 409, code: "revision_conflict", title: "t", detail: "d" }))).toBe(

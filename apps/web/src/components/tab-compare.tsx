@@ -197,8 +197,8 @@ export function TabCompare({
     setBusy("applying");
     try {
       const r = await applyCorrections(tabId, tabTrack, revisionKey, ["position"]);
-      setApplyMessage(applyResultMessage(r.applied, r.skipped));
-      if (r.applied > 0) {
+      setApplyMessage(applyResultMessage(r.applied, r.skipped, r.retuned_to));
+      if (r.applied > 0 || r.retuned_to) {
         onTabChanged?.(r.tab);
         setLearns(true);
       }

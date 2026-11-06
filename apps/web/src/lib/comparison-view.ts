@@ -22,6 +22,13 @@ export function alignmentNotes(c: Comparison): string[] {
   // counted twice as many beats, i.e. it locked onto double tempo.
   if (c.scale === 0.5) notes.push("Andamento detetado ao dobro.");
   else if (c.scale === 2) notes.push("Andamento detetado a metade.");
+  const tab = c.tab_tuning_name;
+  const ref = c.reference_tuning_name;
+  if (tab && ref && tab !== ref) {
+    notes.push(
+      `A tab certa está em ${ref} e esta em ${tab}: as posições só coincidem depois de aplicar as correções, que mudam a afinação.`,
+    );
+  }
   return notes;
 }
 
@@ -91,10 +98,11 @@ export function correctionsSummary(c: Differences["counts"]): string {
   return parts.length > 0 ? parts.join(" · ") : "Nenhuma diferença detetada.";
 }
 
-export function applyResultMessage(applied: number, skipped: number): string {
+export function applyResultMessage(applied: number, skipped: number, retunedTo: string | null = null): string {
   const skippedText = skipped > 0 ? ` (${skipped} ${skipped === 1 ? "ignorada" : "ignoradas"}: corda ocupada)` : "";
-  if (applied === 0) return `Nenhuma posição corrigida${skippedText}`;
-  return `${applied === 1 ? "Corrigida 1 posição" : `Corrigidas ${applied} posições`}${skippedText}`;
+  const tuningText = retunedTo ? `. Afinação mudada para ${retunedTo}.` : "";
+  if (applied === 0) return `Nenhuma posição corrigida${skippedText}${tuningText}`;
+  return `${applied === 1 ? "Corrigida 1 posição" : `Corrigidas ${applied} posições`}${skippedText}${tuningText}`;
 }
 
 /** Message for a 409 `revision_conflict`; null for any other error. */

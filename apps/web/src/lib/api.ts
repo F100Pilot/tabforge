@@ -511,6 +511,9 @@ export interface Comparison {
   onset_error: number | null;
   bars: BarComparison[];
   differences: Differences;
+  /** "E standard", "Drop D"...; null from an API older than the tuning check. */
+  tab_tuning_name: string | null;
+  reference_tuning_name: string | null;
 }
 
 export type DifferenceKind = "position" | "missing" | "extra" | "timing";
@@ -536,6 +539,8 @@ export interface AppliedCorrections {
   tab: Tab;
   applied: number;
   skipped: number;
+  /** The track took the correct tab's tuning (its name). */
+  retuned_to: string | null;
 }
 
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -604,7 +609,12 @@ export function parseDifferences(v: unknown): Differences {
 
 export function parseAppliedCorrections(v: unknown): AppliedCorrections {
   if (!isRec(v) || !isNum(v.applied) || !isNum(v.skipped)) throw new ResponseShapeError("corrections");
-  return { tab: parseTab(v.tab), applied: v.applied, skipped: v.skipped };
+  return {
+    tab: parseTab(v.tab),
+    applied: v.applied,
+    skipped: v.skipped,
+    retuned_to: isStr(v.retuned_to) ? v.retuned_to : null,
+  };
 }
 
 export function parseComparison(v: unknown): Comparison {
@@ -645,6 +655,8 @@ export function parseComparison(v: unknown): Comparison {
     onset_error: v.onset_error,
     bars,
     differences: parseDifferences(v.differences),
+    tab_tuning_name: isStr(v.tab_tuning_name) ? v.tab_tuning_name : null,
+    reference_tuning_name: isStr(v.reference_tuning_name) ? v.reference_tuning_name : null,
   };
 }
 

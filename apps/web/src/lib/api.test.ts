@@ -207,6 +207,11 @@ describe("parseComparison", () => {
   it("accepts a valid comparison, including null position accuracy", () => {
     expect(parseComparison(comparison).bars[0].matched).toBe(3);
   });
+  it("reads the tunings, null from an older API", () => {
+    expect(parseComparison(comparison).tab_tuning_name).toBeNull();
+    const c = parseComparison({ ...comparison, tab_tuning_name: "E standard", reference_tuning_name: "Drop D" });
+    expect([c.tab_tuning_name, c.reference_tuning_name]).toEqual(["E standard", "Drop D"]);
+  });
   it("rejects missing fields and bad bars", () => {
     expect(() => parseComparison({ ...comparison, recall: "x" })).toThrow(ResponseShapeError);
     expect(() => parseComparison({ ...comparison, bars: [{ bar: 1 }] })).toThrow(ResponseShapeError);
@@ -266,7 +271,7 @@ describe("applyCorrections", () => {
     vi.stubGlobal("fetch", f);
     const r = await applyCorrections("t1", 0, "r1", ["position"]);
     await applyCorrections("t1", 2, "r1", ["position"]);
-    expect(r).toMatchObject({ applied: 3, skipped: 1 });
+    expect(r).toMatchObject({ applied: 3, skipped: 1, retuned_to: null });
     expect(r.tab.revision.id).toBe("r2");
     expect(String(f.mock.calls[0][0])).toMatch(/\/v1\/tabs\/t1\/comparison\/apply$/);
     expect(String(f.mock.calls[1][0])).toMatch(/\/comparison\/apply\?track=2$/);
