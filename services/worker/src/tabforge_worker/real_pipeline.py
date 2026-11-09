@@ -13,6 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
+from tabforge_worker.arrange.clean import clean_notes
 from tabforge_worker.arrange.fretting import DEFAULT_WEIGHTS
 from tabforge_worker.arrange.tracks import arrange_guitar, arrange_lead_rhythm
 from tabforge_worker.arrange.tuning import detect_tuning
@@ -97,7 +98,8 @@ class RealPipeline:
                 guitar = self._separator.get().isolate_guitar(audio, work)
 
             on_stage(Stage.TRANSCRIBING)
-            notes = self._transcriber.get().transcribe(guitar)
+            # Quiet notes: harmonics and other instruments leaking into the stem (M3-notes).
+            notes = clean_notes(self._transcriber.get().transcribe(guitar))
             beats = self._beats.get().beats(audio)
 
             on_stage(Stage.ARRANGING)

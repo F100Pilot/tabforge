@@ -241,3 +241,34 @@ def test_a_fixed_tuning_skips_the_detection() -> None:
     )
     score = Score.model_validate(pipe.process(_job("guitar_stem"), lambda _: None).score)
     assert tuple(score.tuning) == standard
+
+
+class FaintTranscriber(FakeTranscriber):
+    """Two loud notes and one far quieter (a harmonic or another instrument's leak)."""
+
+    def transcribe(self, audio: Path) -> list[NoteEvent]:
+        self.inputs.append(audio)
+        return [
+            NoteEvent(0.0, 0.5, 64, 90),
+            NoteEvent(0.1, 0.4, 76, 20),
+            NoteEvent(0.5, 1.0, 69, 90),
+        ]
+
+
+def test_quiet_notes_are_left_out_before_arranging() -> None:
+    transcriber = FaintTranscriber()
+    pipe = RealPipeline(
+        source=FakeSource(lambda dst: write_tone(dst, 2.0)),
+        transcriber=lambda: transcriber,
+        separator=lambda: FakeSeparator(),
+        beat_tracker=lambda: FakeBeats(),
+        stereo=lambda: FakeStereo(),
+    )
+    score = Score.model_validate(pipe.process(_job("guitar_stem"), lambda _: None).score)
+    sounding = [
+        score.tuning[n.string - 1] + n.fret
+        for b in score.bars
+        for beat in b.beats
+        for n in beat.notes
+    ]
+    assert sounding == [64, 69]
