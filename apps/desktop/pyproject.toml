@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "TabForge for Windows: launcher that embeds Postgres, the API, the worker and the web app (ADR-0008)"
 requires-python = ">=3.13,<3.14"
 dependencies = [
-  "tabforge-api",
+  "tabforge-api[youtube]",
   "tabforge-worker",
   "tabforge-score>=0.2.0",
   "uvicorn>=0.30",

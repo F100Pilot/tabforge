@@ -62,6 +62,11 @@ class BundleLayout:
         return self.root / "models"
 
 
+def music_dir() -> Path:
+    """Where imported MP3s are copied: <home>/Music/TabForge (Windows' Music folder)."""
+    return Path.home() / "Music" / "TabForge"
+
+
 def service_env(
     data: DataLayout,
     bundle: BundleLayout,
@@ -89,6 +94,10 @@ def service_env(
         "TABFORGE_WORKER_PIPELINE": pipeline,
         "TABFORGE_FFMPEG": str(executable(bundle.ffmpeg_dir, "ffmpeg")),
         "TABFORGE_FFPROBE": str(executable(bundle.ffmpeg_dir, "ffprobe")),
+        # YouTube import (ADR-0014): yt-dlp runs YouTube's JavaScript on the bundled Node and
+        # keeps a copy of each MP3 in the user's Music folder.
+        "TABFORGE_NODE": str(bundle.node),
+        "TABFORGE_MUSIC_DIR": str(music_dir()),
         # Demucs weights are baked into the bundle; never download at run time.
         "HF_HOME": str(bundle.models / "hf"),
         "HF_HUB_OFFLINE": "1",

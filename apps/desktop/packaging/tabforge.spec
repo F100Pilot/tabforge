@@ -11,11 +11,15 @@ MIGRATIONS = ROOT.parent.parent / "services" / "api" / "migrations"
 
 datas = [(str(BUNDLE / name), name) for name in ("pgsql", "node", "web", "ffmpeg", "models")]
 datas.append((str(MIGRATIONS), "migrations"))
-for package in ("basic_pitch", "librosa", "demucs", "resampy", "webview"):
+# yt_dlp_ejs: the JavaScript yt-dlp runs on Node for YouTube (ADR-0014).
+for package in ("basic_pitch", "librosa", "demucs", "resampy", "webview", "yt_dlp_ejs"):
     datas += collect_data_files(package)
 
 hiddenimports = []
-for package in ("uvicorn", "tabforge_api", "tabforge_worker", "tabforge_score", "psycopg_binary"):
+# yt_dlp loads its extractors and post-processors dynamically.
+for package in (
+    "uvicorn", "tabforge_api", "tabforge_worker", "tabforge_score", "psycopg_binary", "yt_dlp"
+):
     hiddenimports += collect_submodules(package)
 
 binaries = collect_dynamic_libs("psycopg_binary") + collect_dynamic_libs("onnxruntime")

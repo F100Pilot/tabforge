@@ -26,6 +26,9 @@ def test_service_env_is_desktop_local_only(tmp_path: Path) -> None:
     assert env["HF_HUB_OFFLINE"] == "1"
     assert env["HF_HOME"].startswith(str(tmp_path / "bundle"))
     assert "TABFORGE_DEV_AUTH" not in env
+    # YouTube import (ADR-0014): the bundle's Node for yt-dlp and a copy in Music/TabForge.
+    assert env["TABFORGE_NODE"].startswith(str(tmp_path / "bundle" / "node"))
+    assert env["TABFORGE_MUSIC_DIR"] == str(Path.home() / "Music" / "TabForge")
 
 
 def test_web_listens_on_loopback_and_knows_the_api() -> None:
