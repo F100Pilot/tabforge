@@ -33,3 +33,20 @@
 - A maior perda está na separação, não na transcrição. Em 8 dos 20 temas, a pista "guitar" do Demucs fica 40 a 55 dB abaixo da mistura: a guitarra foi para outra pista. Nesses temas a F1 fica em 0,01 a 0,24, mesmo quando a guitarra limpa dava 0,63 a 0,88.
 - Com banda, a limpeza é neutra: tira 6 % das notas, sem mudar a F1.
 - Cortar as notas dos momentos em que a pista de guitarra tem pouca energia face à mistura (−25 a −8 dB) também não ajuda: F1 0,218 no melhor caso.
+
+### Juntar outras pistas do Demucs (estudo, não aplicado)
+
+Todas as pistas do `htdemucs_6s` guardadas, e transcrita a soma de várias (com a limpeza):
+
+| Pistas transcritas | P | R | F1 |
+|---|---|---|---|
+| guitar (atual) | 0,223 | 0,266 | 0,215 |
+| guitar + other | 0,201 | 0,386 | 0,227 |
+| guitar + other + piano | 0,211 | 0,459 | 0,253 |
+| guitar + other só quando a pista guitar fica abaixo de −15 dB da mistura | 0,227 | 0,314 | 0,224 |
+
+- No BabySlakh, o Demucs põe muitas guitarras sintetizadas nas pistas "other" e "piano". Juntá-las recupera notas (recall +0,19) com pouca perda de precisão.
+- **Não foi aplicado:**
+  - as guitarras do BabySlakh são sintetizadas a partir de MIDI e estão no treino do Basic Pitch;
+  - em gravações reais de rock/metal, a pista guitar do Demucs deve ficar com mais guitarra, e somar "other" e "piano" juntaria teclados e sintetizadores às notas a mais, que já são a queixa principal;
+  - decidir com as comparações do utilizador (tab certa vs. IA) em músicas reais.
