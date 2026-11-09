@@ -18,6 +18,11 @@ set "ARGS=%3 %4 %5 %6 %7 %8 %9"
 cd /d "%REPO%"
 if errorlevel 1 goto :fail
 
+rem OneDrive syncs and locks the thousands of files of the Python environment ("Access is
+rem denied" on updates): stop with the fix. A label, not a ( ) block: the path may hold ")".
+echo "%REPO%" | findstr /i "OneDrive" >nul
+if not errorlevel 1 goto :onedrive
+
 where git >nul 2>nul
 if errorlevel 1 (
   echo Falta o Git para Windows: https://git-scm.com/download/win
@@ -65,6 +70,17 @@ if errorlevel 1 goto :fail
 uv run --frozen --no-sync python packaging\dev_start.py %ARGS%
 if errorlevel 1 goto :fail
 exit /b 0
+
+:onedrive
+echo.
+echo O TabForge esta dentro do OneDrive: "%REPO%"
+echo O OneDrive bloqueia os ficheiros do ambiente Python e as atualizacoes falham.
+echo Feche o TabForge e instale-o fora do OneDrive, numa linha de comandos:
+echo     cd /d C:\
+echo     git clone https://github.com/F100Pilot/tabforge.git
+echo     C:\tabforge\start.bat
+echo As tabs ficam em %LOCALAPPDATA%\TabForge e nao se perdem.
+goto :fail
 
 :fail
 echo.
