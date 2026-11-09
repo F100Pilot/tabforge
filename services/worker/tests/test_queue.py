@@ -214,3 +214,14 @@ def test_run_once_survives_account_deletion_mid_job(
     assert "job_failed" not in caplog.text
     assert conn.execute("SELECT count(*) FROM jobs").fetchone() == (0,)
     assert conn.execute("SELECT count(*) FROM tabs").fetchone() == (0,)
+
+
+def test_complete_names_the_tab_after_the_score_tuning(conn: Conn) -> None:
+    _job(conn)
+    job = queue.claim_next(conn, lease_s=600, max_attempts=3)
+    assert job is not None
+    score = {**STUB_SCORE, "tuning": [62, 57, 53, 48, 43, 38]}  # D standard
+    tab_id = queue.complete(conn, job, score)
+    assert conn.execute("SELECT tuning FROM tabs WHERE id = %s", (tab_id,)).fetchone() == (
+        "D standard",
+    )

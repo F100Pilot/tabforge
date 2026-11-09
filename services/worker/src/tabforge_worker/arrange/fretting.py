@@ -170,14 +170,8 @@ def prepare_events(
     )
 
 
-def best_path(prepared: PreparedEvents, weights: Weights = DEFAULT_WEIGHTS) -> list[int]:
-    """Viterbi: the index of the chosen shape of every event (cheapest path, first on ties).
-
-    Hand-shape cost: span * fret spread + height * mean fret (0 for an all-open shape).
-    Move cost: move * |center change|, or open_move * |change| when either shape is all open.
-    """
-    if not prepared.shapes:
-        return []
+def _viterbi(prepared: PreparedEvents, weights: Weights) -> tuple[list[float], list[list[int]]]:
+    """Cheapest cost of ending on each shape of the last event, and the back pointers."""
     w_span, w_height, w_move, w_open = weights.span, weights.height, weights.move, weights.open_move
 
     costs = [
@@ -202,7 +196,18 @@ def best_path(prepared: PreparedEvents, weights: Weights = DEFAULT_WEIGHTS) -> l
             )
         costs = new_costs
         back.append(pointers)
+    return costs, back
 
+
+def best_path(prepared: PreparedEvents, weights: Weights = DEFAULT_WEIGHTS) -> list[int]:
+    """Viterbi: the index of the chosen shape of every event (cheapest path, first on ties).
+
+    Hand-shape cost: span * fret spread + height * mean fret (0 for an all-open shape).
+    Move cost: move * |center change|, or open_move * |change| when either shape is all open.
+    """
+    if not prepared.shapes:
+        return []
+    costs, back = _viterbi(prepared, weights)
     choice = min(range(len(costs)), key=costs.__getitem__)
     chosen = [choice]
     for pointers in reversed(back):
@@ -210,6 +215,11 @@ def best_path(prepared: PreparedEvents, weights: Weights = DEFAULT_WEIGHTS) -> l
         chosen.append(choice)
     chosen.reverse()
     return chosen
+
+
+def path_cost(prepared: PreparedEvents, weights: Weights = DEFAULT_WEIGHTS) -> float:
+    """Total cost of the cheapest path (`best_path`): how hard the music is to play."""
+    return min(_viterbi(prepared, weights)[0]) if prepared.shapes else 0.0
 
 
 def assign_positions(

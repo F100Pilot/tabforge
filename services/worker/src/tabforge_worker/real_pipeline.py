@@ -15,6 +15,7 @@ from typing import Protocol
 
 from tabforge_worker.arrange.fretting import DEFAULT_WEIGHTS
 from tabforge_worker.arrange.tracks import arrange_guitar, arrange_lead_rhythm
+from tabforge_worker.arrange.tuning import detect_tuning
 from tabforge_worker.media import MediaError, normalize_to_wav, probe_duration_s
 from tabforge_worker.pipeline import (
     PipelineError,
@@ -27,7 +28,6 @@ from tabforge_worker.ports import BeatTracker, Separator, StereoAnalyzer, Transc
 from tabforge_worker.queue import ClaimedJob
 
 MAX_DURATION_S = 600.0  # US-01: 10 minutes
-STANDARD_TUNING = (64, 59, 55, 50, 45, 40)  # string 1 (high E) first
 
 
 class AudioSource(Protocol):
@@ -62,7 +62,7 @@ class RealPipeline:
         beat_tracker: Callable[[], BeatTracker],
         stereo: Callable[[], StereoAnalyzer],
         max_duration_s: float = MAX_DURATION_S,
-        tuning: tuple[int, ...] = STANDARD_TUNING,
+        tuning: tuple[int, ...] | None = None,  # None: detected from the notes (ADR-0013)
     ) -> None:
         self._source = source
         self._transcriber = _Lazy(transcriber)
@@ -102,9 +102,10 @@ class RealPipeline:
 
             on_stage(Stage.ARRANGING)
             weights = job.weights or DEFAULT_WEIGHTS  # the owner's tuned weights (ADR-0011)
+            tuning = self._tuning or detect_tuning(notes, weights).tuning
             if job.source_kind == "mix":
                 ratios = self._stereo.get().side_ratios(guitar, notes)
-                score = arrange_lead_rhythm(notes, beats, ratios, self._tuning, weights)
+                score = arrange_lead_rhythm(notes, beats, ratios, tuning, weights)
             else:
-                score = arrange_guitar(notes, beats, self._tuning, weights)
+                score = arrange_guitar(notes, beats, tuning, weights)
         return PipelineResult(score.model_dump(mode="json"), round(duration * 1000), sha)

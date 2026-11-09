@@ -200,3 +200,44 @@ def test_the_owners_tuned_weights_choose_the_positions(kind: str) -> None:
     tuned = Score.model_validate(pipe.process(tuned_job, lambda _: None).score)
     assert _positions(default) != _positions(tuned)
     assert max(f for _, f in _positions(tuned)) > max(f for _, f in _positions(default))
+
+
+class LowBTranscriber(FakeTranscriber):
+    """A riff on low B (35), below E standard: only a down-tuned guitar plays it."""
+
+    def transcribe(self, audio: Path) -> list[NoteEvent]:
+        self.inputs.append(audio)
+        pitches = [35, 35, 38, 40, 42, 35] * 4
+        return [NoteEvent(i * 0.08, i * 0.08 + 0.07, p, 90) for i, p in enumerate(pitches)]
+
+
+@pytest.mark.parametrize("kind", ["guitar_stem", "mix"])
+def test_the_tuning_is_detected_from_the_notes(kind: str) -> None:
+    transcriber = LowBTranscriber()
+    pipe = RealPipeline(
+        source=FakeSource(lambda dst: write_tone(dst, 2.0)),
+        transcriber=lambda: transcriber,
+        separator=lambda: FakeSeparator(),
+        beat_tracker=lambda: FakeBeats(),
+        stereo=lambda: FakeStereo(),
+    )
+    score = Score.model_validate(pipe.process(_job(kind), lambda _: None).score)
+    b_standard = [59, 54, 50, 45, 40, 35]
+    assert all(t.tuning == b_standard for t in score.track_list())
+    # No note falls off the neck: E standard would have dropped every low B as out of range.
+    assert not [w for t in score.track_list() for w in t.warnings if w.code == "out_of_range"]
+
+
+def test_a_fixed_tuning_skips_the_detection() -> None:
+    transcriber = LowBTranscriber()
+    standard = (64, 59, 55, 50, 45, 40)
+    pipe = RealPipeline(
+        source=FakeSource(lambda dst: write_tone(dst, 2.0)),
+        transcriber=lambda: transcriber,
+        separator=lambda: FakeSeparator(),
+        beat_tracker=lambda: FakeBeats(),
+        stereo=lambda: FakeStereo(),
+        tuning=standard,
+    )
+    score = Score.model_validate(pipe.process(_job("guitar_stem"), lambda _: None).score)
+    assert tuple(score.tuning) == standard

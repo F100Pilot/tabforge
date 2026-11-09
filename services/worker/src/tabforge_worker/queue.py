@@ -11,6 +11,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 import psycopg
+from tabforge_score import Score
+from tabforge_score.compare import tuning_name
 
 from tabforge_worker.arrange.fretting import Weights
 
@@ -101,8 +103,8 @@ def complete(
         )
         tab_id = _scalar(
             conn,
-            "INSERT INTO tabs (owner_id, title) VALUES (%s, %s) RETURNING id",
-            (job.owner_id, title),
+            "INSERT INTO tabs (owner_id, title, tuning) VALUES (%s, %s, %s) RETURNING id",
+            (job.owner_id, title, _tuning_label(score)),
         )
         revision_id = _scalar(
             conn,
@@ -119,6 +121,12 @@ def complete(
             (tab_id, job.id),
         )
     return tab_id
+
+
+def _tuning_label(score: dict[str, Any]) -> str:
+    """The tab's tuning name ("E standard", "Drop D"...), detected by the pipeline (ADR-0013)."""
+    tunings = {tuple(t.tuning) for t in Score.model_validate(score).track_list()}
+    return tuning_name(tunings.pop()) if len(tunings) == 1 else "Várias afinações"
 
 
 def fail(conn: psycopg.Connection[Any], job_id: uuid.UUID, error_code: str) -> None:
