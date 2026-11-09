@@ -38,7 +38,10 @@ def step(message: str) -> None:
 
 
 def run(args: list[str], cwd: Path, env: dict[str, str] | None = None) -> None:
-    subprocess.run(args, cwd=cwd, env={**os.environ, **(env or {})}, check=True)  # noqa: S603
+    """Run a step; on failure stop with its exit code (its own output already says why)."""
+    done = subprocess.run(args, cwd=cwd, env={**os.environ, **(env or {})}, check=False)  # noqa: S603
+    if done.returncode != 0:
+        sys.exit(done.returncode)
 
 
 def ensure_downloads() -> None:

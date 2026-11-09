@@ -1,5 +1,9 @@
 """Downloads the Windows runtime pieces listed in downloads.json, verifies SHA-256, and lays them
-out under build/bundle (ADR-0008). Fails on an unpinned or mismatched hash."""
+out under build/bundle (ADR-0008). Fails on an unpinned or mismatched hash.
+
+A file already in build/downloads (same name as in the URL) is used instead of downloading it:
+the way through when a network (a company one, say) blocks a download site. The SHA-256 is
+checked all the same."""
 
 import argparse
 import hashlib
@@ -7,11 +11,13 @@ import json
 import shutil
 import sys
 import tempfile
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+MANUAL_DIR = HERE.parent / "build" / "downloads"
 
 
 def sha256(path: Path) -> str:
@@ -26,11 +32,31 @@ class UnpinnedError(Exception):
     pass
 
 
-def fetch(name: str, spec: dict[str, object], out: Path, work: Path) -> None:
+class DownloadError(Exception):
+    pass
+
+
+def fetch(
+    name: str, spec: dict[str, object], out: Path, work: Path, manual: Path = MANUAL_DIR
+) -> None:
     url = str(spec["url"])
+    work.mkdir(parents=True, exist_ok=True)
+    local = manual / url.rsplit("/", 1)[-1]
     archive = work / f"{name}.zip"
-    print(f"{name}: {url}", flush=True)
-    urllib.request.urlretrieve(url, archive)  # noqa: S310 - https URLs pinned in downloads.json
+    if local.is_file():
+        print(f"{name}: {local}", flush=True)
+        shutil.copy2(local, archive)
+    else:
+        print(f"{name}: {url}", flush=True)
+        try:
+            urllib.request.urlretrieve(url, archive)  # noqa: S310 - https URLs pinned in downloads.json
+        except (urllib.error.URLError, OSError) as exc:
+            raise DownloadError(
+                f"Não foi possível descarregar {name} ({exc}).\n"
+                f"  Descarregue no browser: {url}\n"
+                f"  e guarde o ficheiro como: {local}\n"
+                "  Depois corra o start.bat outra vez."
+            ) from exc
     actual = sha256(archive)
     expected = spec.get("sha256")
     if expected is None:
@@ -68,17 +94,17 @@ def main() -> None:
         if not k.startswith("_")
     }
     args.out.mkdir(parents=True, exist_ok=True)
-    unpinned: list[str] = []
+    problems: list[str] = []
     with tempfile.TemporaryDirectory() as tmp:
         for name, spec in specs.items():
             if args.only and name not in args.only:
                 continue
             try:
                 fetch(name, spec, args.out, Path(tmp))
-            except UnpinnedError as exc:  # report every missing pin in one run
-                unpinned.append(str(exc))
-    if unpinned:
-        sys.exit("\n".join(unpinned))
+            except (UnpinnedError, DownloadError) as exc:  # report every one in one run
+                problems.append(str(exc))
+    if problems:
+        sys.exit("\n".join(problems))
 
 
 if __name__ == "__main__":
