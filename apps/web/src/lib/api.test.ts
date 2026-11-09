@@ -23,6 +23,8 @@ import {
   parseUploadTicket,
   setCsrfToken,
   verifyLogin,
+  importYoutube,
+  parseYoutubeImport,
 } from "./api";
 import { checkFile, MAX_UPLOAD_BYTES } from "./file-checks";
 
@@ -396,5 +398,37 @@ describe("tuning", () => {
     expect(String(f.mock.calls[0][0])).toBe("http://localhost:8000/v1/me/tuning");
     expect(f.mock.calls[1][1].method).toBe("POST");
     expect((f.mock.calls[1][1].headers as Headers).get("X-CSRF-Token")).toBe("tok");
+  });
+});
+
+
+describe("importYoutube", () => {
+  beforeEach(() => vi.stubEnv("NEXT_PUBLIC_API_URL", "http://localhost:8000"));
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    setCsrfToken(null);
+  });
+  const queued = { ...job, status: "queued", stage: null, attempts: 0 };
+
+  it("posts the trimmed link and the recording kind with csrf", async () => {
+    setCsrfToken("tok");
+    const body = { job: queued, title: "Song", mp3_path: "C:\\Users\\me\\Music\\TabForge\\Song.mp3" };
+    const f = vi.fn().mockImplementation(
+      async () => new Response(JSON.stringify(body), { status: 201, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", f);
+    const r = await importYoutube("  https://youtu.be/abc  ", "mix");
+    expect(r.job.status).toBe("queued");
+    expect(r.title).toBe("Song");
+    const [url, init] = f.mock.calls[0];
+    expect(String(url)).toMatch(/\/v1\/imports\/youtube$/);
+    expect(JSON.parse(String(init.body))).toEqual({ url: "https://youtu.be/abc", source_kind: "mix" });
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("tok");
+  });
+
+  it("rejects a malformed answer", () => {
+    expect(() => parseYoutubeImport({ job: queued, title: 1, mp3_path: null })).toThrow(ResponseShapeError);
+    expect(parseYoutubeImport({ job: queued, title: "t", mp3_path: null }).mp3_path).toBeNull();
   });
 });

@@ -2,18 +2,20 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
-import { completeUpload, createUpload, isUnauthenticated, putFile, type SourceKind } from "@/lib/api";
+import { useState, type FormEvent, type KeyboardEvent } from "react";
+import { completeUpload, createUpload, importYoutube, isUnauthenticated, putFile, type SourceKind } from "@/lib/api";
 import { checkFile } from "@/lib/file-checks";
 import { IS_DESKTOP } from "@/lib/desktop";
+import { isYoutubeUrl, youtubeProblemMessage } from "@/lib/youtube";
 
-type Phase = "idle" | "preparing" | "uploading" | "finishing";
+type Phase = "idle" | "preparing" | "uploading" | "finishing" | "importing";
 
 const PHASE_LABEL: Record<Phase, string> = {
   idle: "",
   preparing: "A preparar o envio…",
   uploading: "A enviar o ficheiro…",
   finishing: "A iniciar a transcrição…",
+  importing: "A descarregar do YouTube e a converter para MP3…",
 };
 
 export function UploadForm() {
@@ -24,7 +26,34 @@ export function UploadForm() {
   const [needsLogin, setNeedsLogin] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
+  const [link, setLink] = useState("");
   const busy = phase !== "idle";
+
+  /** Desktop only (ADR-0014): the API downloads the MP3, keeps a copy and queues the job. */
+  async function onImport() {
+    if (!isYoutubeUrl(link)) {
+      setError("Cole o link de um vídeo do YouTube.");
+      return;
+    }
+    setError(null);
+    setNeedsLogin(false);
+    try {
+      setPhase("importing");
+      const result = await importYoutube(link, kind);
+      router.push(`/jobs/${encodeURIComponent(result.job.id)}`);
+    } catch (err) {
+      setError(isUnauthenticated(err) ? "Inicie sessão para continuar." : youtubeProblemMessage(err));
+      setNeedsLogin(isUnauthenticated(err));
+      setPhase("idle");
+    }
+  }
+
+  function onLinkKey(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault(); // Enter here imports the link instead of submitting the file form
+      void onImport();
+    }
+  }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -98,6 +127,28 @@ export function UploadForm() {
           <span className="chip">até 10 min</span>
         </span>
       </label>
+
+      {IS_DESKTOP && (
+        <div className="yt-import">
+          <label htmlFor="youtube-url">Ou cole um link do YouTube</label>
+          <div className="yt-row">
+            <input
+              id="youtube-url"
+              type="url"
+              inputMode="url"
+              placeholder="https://www.youtube.com/watch?v=…"
+              value={link}
+              disabled={busy}
+              onChange={(e) => setLink(e.target.value)}
+              onKeyDown={onLinkKey}
+            />
+            <button type="button" className="btn" disabled={busy || !link.trim()} onClick={() => void onImport()}>
+              Importar
+            </button>
+          </div>
+          <span className="yt-hint">Converte para MP3, guarda uma cópia em Música\TabForge e transcreve.</span>
+        </div>
+      )}
 
       <fieldset disabled={busy} className="segmented">
         <legend>Tipo de gravação</legend>

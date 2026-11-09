@@ -343,6 +343,29 @@ export async function completeUpload(audioId: string) {
   );
 }
 
+export interface YoutubeImport {
+  job: Job;
+  title: string;
+  /** The MP3 copy kept in the music folder, when the desktop configures one. */
+  mp3_path: string | null;
+}
+
+export function parseYoutubeImport(v: unknown): YoutubeImport {
+  if (!isRec(v) || !isStr(v.title) || !isNullableStr(v.mp3_path)) throw new ResponseShapeError("youtube import");
+  return { job: parseJob(v.job), title: v.title, mp3_path: v.mp3_path };
+}
+
+/** Desktop only (ADR-0014): the API downloads the audio as MP3 and queues the job. */
+export async function importYoutube(url: string, kind: SourceKind) {
+  return parseYoutubeImport(
+    await request("/v1/imports/youtube", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: url.trim(), source_kind: kind }),
+    }),
+  );
+}
+
 export async function getJob(id: string, signal?: AbortSignal) {
   return parseJob(await request(`/v1/jobs/${encodeURIComponent(id)}`, { signal }));
 }
