@@ -61,6 +61,10 @@ if errorlevel 1 echo Aviso: git pull falhou; continua com a versao local.
 
 :deps
 cd apps\desktop
+rem Always a uv-managed Python: the Microsoft Store Python redirects %LOCALAPPDATA% to a private
+rem folder, so the data folder it creates is invisible to PostgreSQL (and to the user). uv
+rem recreates a .venv that was made with another Python.
+set "UV_MANAGED_PYTHON=1"
 echo == A instalar dependencias ^(a primeira vez demora^)
 rem Our own packages are reinstalled from the checkout on every start: uv only rebuilds a
 rem path package when its pyproject.toml changes, so a git pull would keep the old code.
