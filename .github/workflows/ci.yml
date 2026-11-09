@@ -145,12 +145,14 @@ jobs:
           uv sync --frozen
           uv run alembic upgrade head
           uv run python -m tabforge_api.cli init-storage
-          nohup uv run uvicorn tabforge_api.main:create_app --factory --port 8000 > "$E2E_API_LOG" 2>&1 &
+          # The venv's own binaries, not `uv run`: a long-lived uv process keeps the uv cache
+          # locked and setup-uv's post-job `uv cache prune` then times out (uv 0.13).
+          nohup .venv/bin/uvicorn tabforge_api.main:create_app --factory --port 8000 > "$E2E_API_LOG" 2>&1 &
       - name: Worker (stub pipeline)
         working-directory: services/worker
         run: |
           uv sync --frozen
-          nohup uv run python -m tabforge_worker > "$RUNNER_TEMP/worker.log" 2>&1 &
+          nohup .venv/bin/python -m tabforge_worker > "$RUNNER_TEMP/worker.log" 2>&1 &
       - name: Web (build and serve)
         working-directory: apps/web
         run: |
