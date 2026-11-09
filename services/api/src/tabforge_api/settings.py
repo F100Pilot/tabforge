@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     api_public_url: AnyHttpUrl = AnyHttpUrl("http://127.0.0.1:47801")
     # Per-launch secret the launcher exchanges for a session at POST /v1/auth/desktop.
     desktop_launch_token: SecretStr | None = None
+    # YouTube import (ADR-0014, desktop only): the bundle's ffmpeg (MP3) and Node (yt-dlp's
+    # JavaScript runtime for YouTube), and the folder that keeps a copy of each MP3.
+    ffmpeg: Path | None = None
+    node: Path | None = None
+    music_dir: Path | None = None
+    max_audio_duration_s: float = Field(default=600.0, gt=0)  # the worker's US-01 limit
 
     # US-01 limits and privacy (PRD §5).
     upload_max_bytes: int = Field(default=50 * 1024 * 1024, gt=0)

@@ -13,6 +13,7 @@ import hmac
 import json
 import os
 import re
+import shutil
 import tempfile
 import time
 from collections.abc import AsyncIterable, Callable
@@ -170,6 +171,20 @@ class LocalObjectStore:
                     fh.write(chunk)
             if written != length:
                 raise UploadSizeError("body is shorter than the signed length")
+            tmp.replace(path)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+
+    def put_file(self, key: str, source: Path) -> None:
+        """Move a finished local file into place (a server-side import, ADR-0014)."""
+        path = self.path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".import-")
+        os.close(fd)
+        tmp = Path(tmp_name)
+        try:
+            shutil.copyfile(source, tmp)
             tmp.replace(path)
         except BaseException:
             tmp.unlink(missing_ok=True)

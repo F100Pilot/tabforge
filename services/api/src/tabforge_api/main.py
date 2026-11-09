@@ -11,6 +11,7 @@ from tabforge_api.mailer import Mailer, build_mailer
 from tabforge_api.problems import ProblemError, install_problem_handlers
 from tabforge_api.routes import (
     auth,
+    imports,
     jobs,
     local_storage,
     me,
@@ -94,4 +95,6 @@ def create_app(
     app.include_router(references.router)
     if local:
         app.include_router(local_storage.router)
+    if settings.env == "desktop":
+        app.include_router(imports.router)  # YouTube import: one local user (ADR-0014)
     return app
