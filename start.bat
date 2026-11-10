@@ -68,12 +68,31 @@ set "UV_MANAGED_PYTHON=1"
 echo == A instalar dependencias ^(a primeira vez demora^)
 rem Our own packages are reinstalled from the checkout on every start: uv only rebuilds a
 rem path package when its pyproject.toml changes, so a git pull would keep the old code.
-uv sync --frozen --extra bundle --reinstall-package tabforge-api --reinstall-package tabforge-worker --reinstall-package tabforge-score
-if errorlevel 1 goto :fail
+set "SYNC=uv sync --frozen --extra bundle --reinstall-package tabforge-api --reinstall-package tabforge-worker --reinstall-package tabforge-score"
+%SYNC%
+if not errorlevel 1 goto :run
+rem A .venv that uv cannot use any more ("Failed to query Python interpreter ... Access is
+rem denied": python.exe blocked or quarantined by security software, or a half-deleted venv)
+rem is thrown away and built again once; the data in %LOCALAPPDATA%\TabForge is not touched.
+echo == O ambiente Python nao respondeu; a cria-lo de novo
+rmdir /s /q .venv 2>nul
+%SYNC%
+if errorlevel 1 goto :venv
+
+:run
 
 uv run --frozen --no-sync python packaging\dev_start.py %ARGS%
 if errorlevel 1 goto :fail
 exit /b 0
+
+:venv
+echo.
+echo Nao foi possivel preparar o ambiente Python em %CD%\.venv
+echo  1. Feche o TabForge e termine no Gestor de Tarefas os python.exe e postgres.exe.
+echo  2. Corra o start.bat outra vez.
+echo  3. Se repetir: Seguranca do Windows - Protecao contra virus e ameacas - Historico de
+echo     protecao. Se o python.exe aparecer bloqueado, so a TI pode autoriza-lo.
+goto :fail
 
 :onedrive
 echo.
