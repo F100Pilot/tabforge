@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { isUnauthenticated, listTabs, type TabSummary } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
+import { deleteTab, isUnauthenticated, listTabs, type TabSummary } from "@/lib/api";
+import { DeleteSong } from "./delete-song";
 import { SignInPrompt } from "./sign-in-prompt";
 import { formatDate } from "@/lib/format";
 
@@ -10,11 +11,13 @@ export function TabList() {
   const [tabs, setTabs] = useState<TabSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [needsLogin, setNeedsLogin] = useState(false);
+  // A list fetched before a delete finished must not bring the deleted song back.
+  const deleted = useRef(new Set<string>());
 
   useEffect(() => {
     const ctrl = new AbortController();
     listTabs(100, ctrl.signal)
-      .then(setTabs)
+      .then((list) => setTabs(list.filter((x) => !deleted.current.has(x.id))))
       .catch((err: unknown) => {
         if (ctrl.signal.aborted) return;
         if (isUnauthenticated(err)) setNeedsLogin(true);
@@ -39,7 +42,7 @@ export function TabList() {
   return (
     <ul className="tab-grid">
       {tabs.map((t) => (
-        <li key={t.id}>
+        <li key={t.id} className="song">
           <Link href={`/tabs/${encodeURIComponent(t.id)}`} className="card-link">
             <span className="card-title">{t.title}</span>
             <span className="card-meta">
@@ -47,6 +50,14 @@ export function TabList() {
               <span className="chip">{t.visibility === "private" ? "Privada" : t.visibility}</span>
             </span>
           </Link>
+          <DeleteSong
+            title={t.title}
+            onDelete={async () => {
+              await deleteTab(t.id);
+              deleted.current.add(t.id);
+              setTabs((list) => list?.filter((x) => x.id !== t.id) ?? null);
+            }}
+          />
         </li>
       ))}
     </ul>

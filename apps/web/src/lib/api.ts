@@ -366,6 +366,24 @@ export async function importYoutube(url: string, kind: SourceKind) {
   );
 }
 
+/** Deletes a song (its audio, job and tab); one that is already gone (404) counts as deleted. */
+async function deleteSong(path: string): Promise<void> {
+  try {
+    await request(path, { method: "DELETE" });
+  } catch (err) {
+    if (err instanceof ProblemError && err.status === 404) return;
+    throw err;
+  }
+}
+
+export function deleteJob(id: string): Promise<void> {
+  return deleteSong(`/v1/jobs/${encodeURIComponent(id)}`);
+}
+
+export function deleteTab(id: string): Promise<void> {
+  return deleteSong(`/v1/tabs/${encodeURIComponent(id)}`);
+}
+
 export async function getJob(id: string, signal?: AbortSignal) {
   return parseJob(await request(`/v1/jobs/${encodeURIComponent(id)}`, { signal }));
 }

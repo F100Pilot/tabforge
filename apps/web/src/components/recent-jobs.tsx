@@ -1,22 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { isUnauthenticated, listJobs, type JobSummary } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
+import { deleteJob, isUnauthenticated, listJobs, type JobSummary } from "@/lib/api";
 import { formatDuration, relativeTime } from "@/lib/format";
 import { jobHref, jobTitle, statusView } from "@/lib/job-view";
+import { DeleteSong } from "./delete-song";
 
 export function RecentJobs() {
   const [jobs, setJobs] = useState<JobSummary[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [needsLogin, setNeedsLogin] = useState(false);
   const [now, setNow] = useState<number | null>(null);
+  // A list fetched before a delete finished must not bring the deleted song back.
+  const deleted = useRef(new Set<string>());
 
   useEffect(() => {
     const ctrl = new AbortController();
     listJobs(5, ctrl.signal)
       .then((j) => {
-        setJobs(j);
+        setJobs(j.filter((x) => !deleted.current.has(x.id)));
         setNow(Date.now());
       })
       .catch((err: unknown) => {
@@ -45,7 +48,7 @@ export function RecentJobs() {
           {jobs.map((j) => {
             const st = statusView(j.status);
             return (
-              <li key={j.id}>
+              <li key={j.id} className="song">
                 <Link href={jobHref(j)} className="card-link">
                   <span className="card-title">{jobTitle(j)}</span>
                   <span className="card-meta">
@@ -57,6 +60,16 @@ export function RecentJobs() {
                     {j.duration_ms !== null && <span className="mono">{formatDuration(j.duration_ms)}</span>}
                   </span>
                 </Link>
+                {j.status !== "running" && (
+                  <DeleteSong
+                    title={jobTitle(j)}
+                    onDelete={async () => {
+                      await deleteJob(j.id);
+                      deleted.current.add(j.id);
+                      setJobs((list) => list?.filter((x) => x.id !== j.id) ?? null);
+                    }}
+                  />
+                )}
               </li>
             );
           })}

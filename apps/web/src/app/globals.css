@@ -1315,3 +1315,34 @@ kbd {
   margin: 0.5rem 0;
   font-size: 0.875rem;
 }
+
+/* A song card with its "Apagar" button and confirmation (recent jobs, tab list). */
+.song {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+.song-delete {
+  align-self: center;
+  background: transparent;
+  color: var(--muted);
+}
+.song-delete:hover {
+  color: var(--error);
+  border-color: var(--error);
+}
+.song-confirm,
+.song-error {
+  grid-column: 1 / -1;
+}
+.song-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
+.song-confirm span {
+  margin-right: auto;
+}
