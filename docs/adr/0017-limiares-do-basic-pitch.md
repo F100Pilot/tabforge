@@ -14,7 +14,7 @@
 `eval/eval_detection.py` ([M3-detection](../eval/M3-detection.md)): 300 combinações de ataque, duração, nota mínima e rácio de limpeza, aplicadas às ativações do Basic Pitch (o modelo corre uma vez por gravação).
 
 - Escolhida nos guitarristas 00–02 do GuitarSet: ataque 0,5, duração 0,4, nota mínima 58 ms, limpeza 0,7. Nos guitarristas 03–05: F1 0,765 → 0,782. Nas 20 músicas com banda (BabySlakh, Demucs): 0,278 → 0,283.
-- Afinar por guitarrista, por cima disso e medido em gravações que não viu: +0,000 a +0,016.
+- Afinar por guitarrista, por cima disso e medido em gravações que não viu: +0,000 a +0,015.
 - Afinar por música com banda e usar noutras músicas: não melhora (0,278 → 0,274).
 
 ## Decisão
