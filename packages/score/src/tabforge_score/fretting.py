@@ -10,7 +10,7 @@ fretboard as `out_of_range`; notes that cannot share the strings with the rest o
 `too_many_notes`, quietest first.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from statistics import fmean
 
@@ -147,10 +147,19 @@ def _moves(previous: Sequence[float | None], current: Sequence[float | None]) ->
 
 
 def prepare_events(
-    events: Sequence[tuple[Sequence[int], Sequence[int]]], tuning: Sequence[int]
+    events: Sequence[tuple[Sequence[int], Sequence[int]]],
+    tuning: Sequence[int],
+    fixed: Mapping[int, Shape] | None = None,
 ) -> PreparedEvents:
-    """Drop unplayable notes and list the shapes of each event (see `assign_positions`)."""
-    prepared = [_playable(p, v, tuning) for p, v in events]
+    """Drop unplayable notes and list the shapes of each event (see `assign_positions`).
+
+    `fixed` gives some events (by index) their only shape: the positions of their pitches, in
+    the same order. The path then has to pass through them (re-fretting keeps them, ADR-0016).
+    """
+    prepared = [
+        (list(p), [fixed[i]], []) if fixed is not None and i in fixed else _playable(p, v, tuning)
+        for i, (p, v) in enumerate(events)
+    ]
     spreads: list[tuple[int, ...]] = []
     centers: list[tuple[float | None, ...]] = []
     for _, shapes, _ in prepared:
