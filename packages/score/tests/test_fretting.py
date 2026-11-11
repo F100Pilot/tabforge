@@ -1,4 +1,4 @@
-from tabforge_worker.arrange.fretting import Position, assign_positions, candidate_positions
+from tabforge_score.fretting import Position, assign_positions, candidate_positions
 
 STANDARD = (64, 59, 55, 50, 45, 40)  # string 1 (high E) .. string 6 (low E)
 
