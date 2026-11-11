@@ -47,7 +47,7 @@ jobs:
       PACKAGE: ${{ github.event_name == 'workflow_dispatch' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
       - name: Smoke test from source (start.bat, as used for local testing)
         shell: cmd
         run: |
