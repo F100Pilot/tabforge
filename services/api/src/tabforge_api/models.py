@@ -34,7 +34,7 @@ AUDIO_SOURCE_KINDS = ("mix", "guitar_stem")
 JOB_STATUSES = ("queued", "running", "done", "failed")
 JOB_STAGES = ("normalizing", "separating", "transcribing", "arranging")
 TAB_VISIBILITIES = ("private", "unlisted", "public")
-REVISION_SOURCES = ("ai", "user")
+REVISION_SOURCES = ("ai", "user", "learned")  # learned: ADR-0016
 PROFILE_STATUSES = ("stale", "ready", "insufficient")
 
 

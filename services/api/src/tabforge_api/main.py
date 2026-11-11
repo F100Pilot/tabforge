@@ -16,6 +16,7 @@ from tabforge_api.routes import (
     local_storage,
     me,
     references,
+    refret,
     tabs,
     tuning,
     uploads,
@@ -93,6 +94,7 @@ def create_app(
     app.include_router(jobs.router)
     app.include_router(tabs.router)
     app.include_router(references.router)
+    app.include_router(refret.router)
     if local:
         app.include_router(local_storage.router)
     if settings.env == "desktop":
