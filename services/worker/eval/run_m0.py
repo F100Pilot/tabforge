@@ -20,9 +20,9 @@ import soundfile
 from _common import GUITARSET_DIRNAME, data_dir, package_versions
 
 from tabforge_worker.adapters.basic_pitch import (
-    DEFAULT_FRAME_THRESHOLD,
-    DEFAULT_MIN_NOTE_LENGTH_MS,
-    DEFAULT_ONSET_THRESHOLD,
+    LIBRARY_FRAME_THRESHOLD,
+    LIBRARY_MIN_NOTE_LENGTH_MS,
+    LIBRARY_ONSET_THRESHOLD,
     BasicPitchOnnxTranscriber,
 )
 from tabforge_worker.evaluation.guitarset import parse_jams, parse_track_id
@@ -55,9 +55,9 @@ def main() -> int:
     parser.add_argument("--device", help="Demucs device (default: cuda if available)")
     parser.add_argument("--limit", type=int, help="evaluate only the first N tracks")
     parser.add_argument("--every", type=int, default=1, help="take every k-th track (subset)")
-    parser.add_argument("--onset-threshold", type=float, default=DEFAULT_ONSET_THRESHOLD)
-    parser.add_argument("--frame-threshold", type=float, default=DEFAULT_FRAME_THRESHOLD)
-    parser.add_argument("--min-note-ms", type=float, default=DEFAULT_MIN_NOTE_LENGTH_MS)
+    parser.add_argument("--onset-threshold", type=float, default=LIBRARY_ONSET_THRESHOLD)
+    parser.add_argument("--frame-threshold", type=float, default=LIBRARY_FRAME_THRESHOLD)
+    parser.add_argument("--min-note-ms", type=float, default=LIBRARY_MIN_NOTE_LENGTH_MS)
     parser.add_argument("--tag", default="", help="suffix for the output file name")
     args = parser.parse_args()
 

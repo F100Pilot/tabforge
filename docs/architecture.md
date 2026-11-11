@@ -187,3 +187,4 @@ Aplicação Windows para um só utilizador, sem servidor. Os mesmos serviços co
 - [ADR-0014](adr/0014-importar-do-youtube.md) — Importar áudio de um link do YouTube (só no desktop)
 - [ADR-0015](adr/0015-ci-so-quando-faz-falta.md) — Workflows do GitHub Actions só quando o que testam muda (Windows, Docker e CodeQL deixam de correr em cada push)
 - [ADR-0016](adr/0016-aprender-com-uma-tab-e-refazer-posicoes.md) — Aprender com uma tab certa (validação por metades) e refazer as posições de uma tab existente com os pesos aprendidos
+- [ADR-0017](adr/0017-limiares-do-basic-pitch.md) — Limiares do Basic Pitch escolhidos com a limpeza das notas (duração 0,4, nota mínima 58 ms); sem aprendizagem da deteção por utilizador

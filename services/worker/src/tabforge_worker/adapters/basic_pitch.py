@@ -7,10 +7,17 @@ from basic_pitch.inference import Model, predict
 
 from tabforge_worker.ports import NoteEvent
 
-# Library defaults of basic-pitch 0.4.0 `predict()`.
+# Library defaults of basic-pitch 0.4.0 `predict()` (M0, ADR-0002).
+LIBRARY_ONSET_THRESHOLD = 0.5
+LIBRARY_FRAME_THRESHOLD = 0.3
+LIBRARY_MIN_NOTE_LENGTH_MS = 127.70
+
+# TabForge's (ADR-0017, docs/eval/M3-detection.md): with the clean-up of quiet notes
+# (arrange.clean), a higher frame threshold and shorter notes find more of the real ones.
+# Chosen on GuitarSet players 00-02; players 03-05: note F1 0.765 -> 0.782.
 DEFAULT_ONSET_THRESHOLD = 0.5
-DEFAULT_FRAME_THRESHOLD = 0.3
-DEFAULT_MIN_NOTE_LENGTH_MS = 127.70
+DEFAULT_FRAME_THRESHOLD = 0.4
+DEFAULT_MIN_NOTE_LENGTH_MS = 58.0
 
 
 class BasicPitchOnnxTranscriber:
