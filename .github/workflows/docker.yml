@@ -42,7 +42,7 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: docker build -f services/api/Dockerfile -t tabforge-api .
       - run: docker build -f services/worker/Dockerfile -t tabforge-worker .
       - name: Worker image loads its models offline
