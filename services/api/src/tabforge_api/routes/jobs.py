@@ -4,13 +4,14 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from tabforge_api.deps import CurrentUser, SessionDep
+from tabforge_api.deps import CurrentUser, SessionDep, StoreDep, limit_writes
 from tabforge_api.models import AudioAsset, Job, Tab
 from tabforge_api.problems import ProblemError
+from tabforge_api.songs import delete_song, refuse_running
 
 router = APIRouter(prefix="/v1/jobs", tags=["jobs"])
 
@@ -87,3 +88,26 @@ def get_job(job_id: uuid.UUID, user: CurrentUser, session: SessionDep) -> JobOut
     if job is None:
         raise ProblemError(404, "not_found", "job not found")
     return JobOut.from_model(job)
+
+
+@router.delete("/{job_id}", status_code=204, dependencies=[Depends(limit_writes)])
+def delete_job(
+    job_id: uuid.UUID, user: CurrentUser, session: SessionDep, store: StoreDep
+) -> Response:
+    """Delete the song: the job's audio, the job and the tab it produced."""
+    # FOR UPDATE: a job the worker is claiming is read again once it commits (now running).
+    row = session.execute(
+        select(Job, AudioAsset)
+        .join(AudioAsset, AudioAsset.id == Job.audio_id)
+        .where(Job.id == job_id, AudioAsset.user_id == user.id)
+        .with_for_update(of=Job)
+    ).first()
+    if row is None:
+        raise ProblemError(404, "not_found", "job not found")
+    job, asset = row
+    refuse_running([job])
+    tab = session.get(Tab, job.tab_id) if job.tab_id is not None else None
+    if tab is not None and tab.owner_id != user.id:
+        tab = None
+    delete_song(session, store, user.id, assets=[asset], tab=tab)
+    return Response(status_code=204)

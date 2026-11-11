@@ -104,7 +104,9 @@ erDiagram
 | `POST` | `/v1/uploads` | `{content_type, size_bytes, source_kind}` → URL pré-assinado (PUT, assina `Content-Type` e `Content-Length`, ≤ 5 min) + `audio_id`; 413/415 |
 | `POST` | `/v1/uploads/{id}/complete` | Confirma tamanho e magic bytes (se não coincidirem: apaga, 415); cria job `queued` |
 | `GET` | `/v1/jobs/{id}` | Estado + etapa |
+| `DELETE` | `/v1/jobs/{id}` | Só do dono (CSRF e limite de escritas). Apaga a música: o áudio guardado (primeiro; se falhar → 503 `storage_unavailable` e nada é apagado), a tarefa e a tab que produziu (revisões e tabs certas incluídas; havendo tab certa, marca o perfil de aprendizagem `stale`) → 204; 409 `job_running` enquanto o worker a transcreve; 404. A cópia em Música\TabForge (ADR-0014) fica |
 | `GET` | `/v1/tabs/{id}` | Tab + revisão atual (score v1/v2/v3) + alphaTex gerado no servidor (v3: `\track` por pista) |
+| `DELETE` | `/v1/tabs/{id}` | Como `DELETE /v1/jobs/{id}`, a partir da tab: apaga a tab e a tarefa e o áudio de onde veio → 204; 409 `job_running`; 404 |
 | `POST` | `/v1/tabs/{id}/revisions` | Nova revisão (edição); aceita Score v1/v2/v3 |
 | `POST` | `/v1/tabs/{id}/preview` | `{score}` → `{alphatex}` sem gravar (o editor redesenha a partir daqui) |
 | `PUT` | `/v1/tabs/{id}/reference?track=N` | Só do dono. Guarda a tab certa da pista `N` (inteiro ≥ 0, por defeito 0; ADR-0010) como notas (ADR-0009): `{filename, track, notes: [{onset, pitch, string, fret, bar}]}` (1–20 000 notas, corpo ≤ 2 MB); substitui a anterior dessa pista → 200 `{filename, track, notes, created_at}`; 422 `invalid_track` se a revisão atual não tem a pista `N`; 413/422 |

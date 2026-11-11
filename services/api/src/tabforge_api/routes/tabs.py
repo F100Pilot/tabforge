@@ -4,15 +4,16 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from tabforge_score import Score, to_alphatex
 
-from tabforge_api.deps import CurrentUser, SessionDep, limit_writes
-from tabforge_api.models import Tab, TabRevision
+from tabforge_api.deps import CurrentUser, SessionDep, StoreDep, limit_writes
+from tabforge_api.models import AudioAsset, Job, Tab, TabRevision
 from tabforge_api.problems import ProblemError
 from tabforge_api.routes.tuning import mark_stale
+from tabforge_api.songs import delete_song, refuse_running
 
 router = APIRouter(prefix="/v1/tabs", tags=["tabs"])
 
@@ -214,3 +215,20 @@ def get_revision(
     if revision is None:
         raise ProblemError(404, "not_found", "revision not found")
     return _revision_out(revision)
+
+
+@router.delete("/{tab_id}", status_code=204, dependencies=[Depends(limit_writes)])
+def delete_tab(
+    tab_id: uuid.UUID, user: CurrentUser, session: SessionDep, store: StoreDep
+) -> Response:
+    """Delete the song: the tab, its revisions and references, and the job and audio behind it."""
+    tab = owned_tab(session, user, tab_id, lock=True)
+    rows = session.execute(
+        select(Job, AudioAsset)
+        .join(AudioAsset, AudioAsset.id == Job.audio_id)
+        .where(Job.tab_id == tab.id, AudioAsset.user_id == user.id)
+        .with_for_update(of=Job)
+    ).all()
+    refuse_running([job for job, _ in rows])
+    delete_song(session, store, user.id, assets=[asset for _, asset in rows], tab=tab)
+    return Response(status_code=204)
