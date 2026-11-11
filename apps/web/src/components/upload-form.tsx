@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent, type KeyboardEvent } from "react";
+import { useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { completeUpload, createUpload, importYoutube, isUnauthenticated, putFile, type SourceKind } from "@/lib/api";
 import { checkFile } from "@/lib/file-checks";
 import { IS_DESKTOP } from "@/lib/desktop";
@@ -28,6 +28,22 @@ export function UploadForm() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [link, setLink] = useState("");
   const busy = phase !== "idle";
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  // Next keeps this page alive (hidden by React <Activity>, cacheComponents) after the
+  // router.push to the job: without this reset, coming back showed the form still busy
+  // ("A descarregar do YouTube…") with every control disabled. Each visit starts fresh.
+  useLayoutEffect(() => {
+    const input = fileInput.current;
+    return () => {
+      setPhase("idle");
+      setFile(null);
+      if (input) input.value = ""; // the DOM is kept too
+      setLink("");
+      setError(null);
+      setNeedsLogin(false);
+    };
+  }, []);
 
   /** Desktop only (ADR-0014): the API downloads the MP3, keeps a copy and queues the job. */
   async function onImport() {
@@ -112,6 +128,7 @@ export function UploadForm() {
       >
         <input
           id="audio-file"
+          ref={fileInput}
           className="sr-input"
           type="file"
           accept="audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/flac,audio/x-flac,audio/ogg,.mp3,.wav,.flac,.ogg"
