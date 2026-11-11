@@ -198,9 +198,9 @@ def _high_player_tracks(tabs: int, notes_per_tab: int, seed: int = 3) -> list[Tr
     return tracks
 
 
-def _default_player_tracks(tabs: int, notes_per_tab: int) -> list[TrainingTrack]:
+def _default_player_tracks(tabs: int, notes_per_tab: int, seed: int = 3) -> list[TrainingTrack]:
     tracks = []
-    for track in _high_player_tracks(tabs, notes_per_tab):
+    for track in _high_player_tracks(tabs, notes_per_tab, seed):
         events = [(e.pitches, (90,) * len(e.pitches)) for e in track.events]
         fretted = assign_positions(events, STANDARD)
         tracks.append(
@@ -245,9 +245,26 @@ def test_too_few_notes_is_insufficient() -> None:
     assert result.notes == (MIN_NOTES - 1) // 3 * 3
 
 
-def test_one_tab_is_insufficient_however_many_notes() -> None:
-    result = tune(_high_player_tracks(tabs=MIN_TABS - 1, notes_per_tab=1000))
-    assert (result.status, result.tabs, result.weights) == ("insufficient", 1, None)
+def test_one_tab_is_enough_to_learn() -> None:
+    # ADR-0016: with one tab each half of it is placed with the weights best on the other half.
+    assert MIN_TABS == 1
+    result = tune(_high_player_tracks(tabs=1, notes_per_tab=300))
+    assert (result.status, result.tabs, result.notes) == ("ready", 1, 300)
+    assert result.weights is not None
+    assert result.default_accuracy is not None and result.tuned_accuracy is not None
+    assert result.tuned_accuracy > result.default_accuracy + 0.2
+
+
+def test_one_tab_whose_halves_disagree_keeps_the_default() -> None:
+    # First half played high on the neck, second half exactly as the default weights play it:
+    # weights that fit the first half lose on the second, so nothing is accepted.
+    high = _high_player_tracks(tabs=1, notes_per_tab=150)[0].events
+    low = _default_player_tracks(tabs=1, notes_per_tab=150, seed=5)[0].events
+    result = tune([TrainingTrack("t0", STANDARD, high + low)])
+    assert result.status == "ready"
+    assert result.weights is None
+    assert result.tuned_accuracy is not None and result.default_accuracy is not None
+    assert result.tuned_accuracy <= result.default_accuracy
 
 
 def test_no_data_is_insufficient_without_accuracies() -> None:
@@ -256,10 +273,12 @@ def test_no_data_is_insufficient_without_accuracies() -> None:
     assert (result.default_accuracy, result.tuned_accuracy) == (None, None)
 
 
-def test_two_tabs_are_judged_in_sample() -> None:
+def test_two_tabs_are_judged_on_held_out_halves() -> None:
     result = tune(_high_player_tracks(tabs=2, notes_per_tab=150))
     assert result.status == "ready"
     assert result.weights is not None
+    assert result.tuned_accuracy is not None and result.default_accuracy is not None
+    assert result.tuned_accuracy > result.default_accuracy
 
 
 def test_tuning_5000_notes_takes_seconds() -> None:

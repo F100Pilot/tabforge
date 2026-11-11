@@ -8,8 +8,9 @@ correct string and fret.
 
 `tune` grid-searches the four `Weights`. With 3 or more tabs the result is judged by leave-one-
 tab-out cross-validation: each tab is placed with the weights that do best on the other tabs, and
-the weights are accepted only if those held-out placements beat the default weights. With 2 tabs
-the comparison is in-sample. Below `MIN_NOTES` notes or `MIN_TABS` tabs nothing is tuned.
+the weights are accepted only if those held-out placements beat the default weights. With 1 or 2
+tabs (ADR-0016) the held-out parts are the two halves in time of every track instead of the
+tabs. Below `MIN_NOTES` notes nothing is tuned.
 """
 
 import logging
@@ -33,7 +34,7 @@ from tabforge_worker.arrange.fretting import (
 log = logging.getLogger("tabforge_worker")
 
 MIN_NOTES = 200
-MIN_TABS = 2
+MIN_TABS = 1  # ADR-0016 (was 2 in ADR-0011)
 CV_MIN_TABS = 3
 MAX_TRAINING_NOTES = 5_000  # whole tabs, newest first; bounds a refresh to a few seconds
 STANDARD_TUNING = (64, 59, 55, 50, 45, 40)  # string 1 (high E) first
@@ -257,6 +258,19 @@ def _correct_per_tab(
     return counts
 
 
+def halves(tracks: Sequence[TrainingTrack]) -> list[TrainingTrack]:
+    """Every track split into its first and second half of events, the held-out parts when
+    there are too few tabs to hold out whole tabs (ADR-0016). The halves of all tracks of a tab
+    share a key (`<tab>/1`, `<tab>/2`), as the tracks of a tab do in leave-one-tab-out."""
+    parts: list[TrainingTrack] = []
+    for track in tracks:
+        middle = len(track.events) // 2
+        for half, events in ((1, track.events[:middle]), (2, track.events[middle:])):
+            if events:
+                parts.append(TrainingTrack(f"{track.tab}/{half}", track.tuning, events))
+    return parts
+
+
 def tune(
     tracks: Sequence[TrainingTrack],
     grid: Sequence[Weights] = GRID,
@@ -271,8 +285,9 @@ def tune(
         default_count = sum(c[0] for c in _correct_per_tab(tracks, [default]).values())
         return TuningResult("insufficient", None, default_count / notes, None, tabs, notes)
     candidates = list(dict.fromkeys([default, *grid]))
-    counts = _correct_per_tab(tracks, candidates)
-    choice = choose(list(counts.values()), notes, cross_validate=tabs >= CV_MIN_TABS)
+    held_out = tracks if tabs >= CV_MIN_TABS else halves(tracks)
+    counts = _correct_per_tab(held_out, candidates)
+    choice = choose(list(counts.values()), notes, cross_validate=True)
     return TuningResult(
         "ready",
         candidates[choice.index] if choice.accepted else None,

@@ -22,12 +22,12 @@ const base: Tuning = {
   weights: null,
   updated_at: null,
   min_notes: 200,
-  min_tabs: 2,
+  min_tabs: 1,
 };
 
 describe("statusLine", () => {
   it("none", () =>
-    expect(statusLine(base)).toBe("Ainda não aprendeu: compare pelo menos 2 tabs com a tab certa (200 notas)."));
+    expect(statusLine(base)).toBe("Ainda não aprendeu: compare pelo menos 1 tab com a tab certa (200 notas)."));
   it("stale", () => expect(statusLine({ ...base, status: "stale" })).toBe("A aprender com as suas tabs…"));
   it("ready", () =>
     expect(statusLine({ ...base, status: "ready", tabs: 3, notes: 640 })).toBe("Aprendeu com 3 tabs (640 notas)."));
@@ -35,7 +35,7 @@ describe("statusLine", () => {
     expect(statusLine({ ...base, status: "ready", tabs: 1, notes: 1 })).toBe("Aprendeu com 1 tab (1 nota)."));
   it("insufficient", () =>
     expect(statusLine({ ...base, status: "insufficient", tabs: 1, notes: 80 })).toBe(
-      "Dados insuficientes: 1 tab, 80 notas; precisa de 2 tabs e 200 notas.",
+      "Dados insuficientes: 1 tab, 80 notas; precisa de 1 tab e 200 notas.",
     ));
   it("uses the server minimums", () =>
     expect(statusLine({ ...base, min_tabs: 3, min_notes: 300 })).toContain("pelo menos 3 tabs"));
@@ -44,7 +44,7 @@ describe("statusLine", () => {
 describe("accuracyLine", () => {
   it("only when ready with both numbers", () => {
     expect(accuracyLine({ ...base, status: "ready", default_accuracy: 0.62, tuned_accuracy: 0.714 })).toBe(
-      "Posições certas: 62 % → 71 % (validado tab a tab)",
+      "Posições certas: 62 % → 71 % (medido em notas que não serviram para aprender)",
     );
     expect(accuracyLine({ ...base, status: "ready", default_accuracy: 0.62, tuned_accuracy: null })).toBeNull();
     expect(accuracyLine({ ...base, status: "stale", default_accuracy: 0.62, tuned_accuracy: 0.7 })).toBeNull();

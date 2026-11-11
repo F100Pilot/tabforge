@@ -86,7 +86,7 @@ def test_without_a_profile_the_status_is_none(client: TestClient) -> None:
         "weights": None,
         "updated_at": None,
         "min_notes": 200,
-        "min_tabs": 2,
+        "min_tabs": 1,
     }
 
 

@@ -149,14 +149,14 @@ def test_refresh_learns_and_stores_accepted_weights(conn: Conn) -> None:
 
 
 def test_too_little_data_is_stored_as_insufficient(conn: Conn) -> None:
-    user = _high_player(conn, tabs=1, notes=MIN_NOTES + 50)
+    user = _high_player(conn, tabs=1, notes=MIN_NOTES - 1)
     _stale(conn, user)
     assert profiles.refresh_next(conn) is not None
     row = _row(conn, user)
     assert (row["status"], row["tabs"], row["notes"], row["weights"]) == (
         "insufficient",
         1,
-        MIN_NOTES + 50,
+        MIN_NOTES - 1,
         None,
     )
     assert row["default_accuracy"] is not None and row["tuned_accuracy"] is None

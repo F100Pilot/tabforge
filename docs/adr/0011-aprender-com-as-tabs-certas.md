@@ -1,6 +1,6 @@
 # ADR-0011 — Aprender a escolha de corda/traste com as tabs certas e as correções
 
-- **Estado:** Aceite
+- **Estado:** Aceite; alterado pelo [ADR-0016](0016-aprender-com-uma-tab-e-refazer-posicoes.md) (mínimo de 1 tab, validação por metades com 1 ou 2 tabs, refazer as posições de tabs existentes)
 - **Data:** 2026-11-05
 
 ## Contexto

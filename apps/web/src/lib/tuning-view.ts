@@ -10,19 +10,19 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 export function statusLine(t: Tuning): string {
   switch (t.status) {
     case "none":
-      return `Ainda não aprendeu: compare pelo menos ${t.min_tabs} tabs com a tab certa (${t.min_notes} notas).`;
+      return `Ainda não aprendeu: compare pelo menos ${plural(t.min_tabs, "tab", "tabs")} com a tab certa (${t.min_notes} notas).`;
     case "stale":
       return "A aprender com as suas tabs…";
     case "ready":
       return `Aprendeu com ${plural(t.tabs, "tab", "tabs")} (${plural(t.notes, "nota", "notas")}).`;
     case "insufficient":
-      return `Dados insuficientes: ${plural(t.tabs, "tab", "tabs")}, ${plural(t.notes, "nota", "notas")}; precisa de ${t.min_tabs} tabs e ${t.min_notes} notas.`;
+      return `Dados insuficientes: ${plural(t.tabs, "tab", "tabs")}, ${plural(t.notes, "nota", "notas")}; precisa de ${plural(t.min_tabs, "tab", "tabs")} e ${t.min_notes} notas.`;
   }
 }
 
 export function accuracyLine(t: Tuning): string | null {
   if (t.status !== "ready" || t.default_accuracy === null || t.tuned_accuracy === null) return null;
-  return `Posições certas: ${formatPercent(t.default_accuracy)} → ${formatPercent(t.tuned_accuracy)} (validado tab a tab)`;
+  return `Posições certas: ${formatPercent(t.default_accuracy)} → ${formatPercent(t.tuned_accuracy)} (medido em notas que não serviram para aprender)`;
 }
 
 export function inUseLine(t: Tuning): string | null {

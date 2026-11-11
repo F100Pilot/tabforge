@@ -25,7 +25,7 @@ router = APIRouter(prefix="/v1/me", tags=["tuning"])
 
 # Below these the worker does not tune (same values as tabforge_worker.learning).
 MIN_NOTES = 200
-MIN_TABS = 2
+MIN_TABS = 1  # ADR-0016
 WEIGHT_NAMES = ("span", "height", "move", "open_move")
 
 
