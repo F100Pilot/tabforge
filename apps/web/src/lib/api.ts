@@ -55,13 +55,18 @@ export interface ScoreInfo {
   tracks: Array<Pick<ScoreTrack, "name" | "tuning" | "warnings">>;
 }
 
+/** Where a revision came from: the transcription, the user's edit, or re-fretting with the
+ * learned weights (ADR-0016). */
+export type RevisionSource = "ai" | "user" | "learned";
+const isRevisionSource = (v: unknown): v is RevisionSource => v === "ai" || v === "user" || v === "learned";
+
 export interface Tab {
   id: string;
   title: string;
   tuning: unknown;
   visibility: string;
   created_at: string;
-  revision: { id: string; source: "ai" | "user"; created_at: string; score: unknown };
+  revision: { id: string; source: RevisionSource; created_at: string; score: unknown };
   alphatex: string;
 }
 
@@ -136,7 +141,7 @@ export function parseTab(v: unknown): Tab {
     !isStr(v.alphatex) ||
     !isRec(v.revision) ||
     !isStr(v.revision.id) ||
-    (v.revision.source !== "ai" && v.revision.source !== "user") ||
+    !isRevisionSource(v.revision.source) ||
     !isStr(v.revision.created_at)
   ) {
     throw new ResponseShapeError("tab");
@@ -402,14 +407,14 @@ export async function listTabs(limit: number, signal?: AbortSignal) {
 
 export interface RevisionSummary {
   id: string;
-  source: "ai" | "user";
+  source: RevisionSource;
   created_at: string;
 }
 
 export function parseRevisionList(v: unknown): RevisionSummary[] {
   if (!isRec(v) || !Array.isArray(v.items)) throw new ResponseShapeError("revision list");
   return v.items.map((it) => {
-    if (!isRec(it) || !isStr(it.id) || (it.source !== "ai" && it.source !== "user") || !isStr(it.created_at)) {
+    if (!isRec(it) || !isStr(it.id) || !isRevisionSource(it.source) || !isStr(it.created_at)) {
       throw new ResponseShapeError("revision");
     }
     return { id: it.id, source: it.source, created_at: it.created_at };
@@ -767,6 +772,28 @@ export async function applyCorrections(
       method: "POST",
       headers: JSON_HEADERS,
       body: JSON.stringify({ base_revision_id: baseRevisionId, kinds }),
+    }),
+  );
+}
+
+export interface Refretted {
+  tab: Tab;
+  /** Attacked notes now on another string or fret; 0 means no new revision. */
+  changed: number;
+}
+
+export function parseRefretted(v: unknown): Refretted {
+  if (!isRec(v) || !isNum(v.changed)) throw new ResponseShapeError("refret");
+  return { tab: parseTab(v.tab), changed: v.changed };
+}
+
+/** ADR-0016: place every track again with the learned weights, as a new revision. */
+export async function refretTab(tabId: string, baseRevisionId: string): Promise<Refretted> {
+  return parseRefretted(
+    await request(`/v1/tabs/${encodeURIComponent(tabId)}/refret`, {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ base_revision_id: baseRevisionId }),
     }),
   );
 }

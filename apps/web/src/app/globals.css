@@ -1346,3 +1346,16 @@ kbd {
 .song-confirm span {
   margin-right: auto;
 }
+
+/* "Refazer as posições com o que aprendi" (ADR-0016), above the comparison on the tab page. */
+.refret {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+.refret h2 {
+  margin: 0;
+  font-size: 1rem;
+}

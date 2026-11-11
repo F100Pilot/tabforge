@@ -48,6 +48,7 @@ import { scoreTracks, withTrack } from "@/lib/tracks";
 import { SignInPrompt } from "./sign-in-prompt";
 import { formatDate } from "@/lib/format";
 import { loadScoreTheme, SCORE_COLORS, type ScoreTheme } from "@/lib/score-theme";
+import { sourceLabel } from "@/lib/refret-view";
 
 const ASSET_BASE = "/alphatab";
 const CONFLICT_MESSAGE = "A tab foi alterada noutro lado. Recarregue para ver a versão mais recente.";
@@ -645,7 +646,7 @@ function EditorBody({ tab, initialScore }: { tab: Tab; initialScore: ScoreDoc })
                   <span className="tl-dot" aria-hidden="true" />
                   <div>
                     <div className="tl-title">
-                      {r.source === "ai" ? "Gerada por IA" : "Editada por si"}
+                      {sourceLabel(r.source)}
                       {i === 0 && <span className="chip chip-accent tl-badge">atual</span>}
                     </div>
                     <div className="muted tl-date">{formatDate(r.created_at)}</div>

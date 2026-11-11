@@ -43,6 +43,8 @@
 
 - [ ] Comparar e afinar (depois do PR #9): importar a tab certa (.gp 3–7 via alphaTab) de uma música já transcrita, alinhar com a versão da IA (introduções, repetições, tempo), mostrar métricas (notas encontradas, posições corretas)
 - [x] Afinar os pesos de corda/traste (Viterbi) por utilizador com as tabs certas importadas e com as revisões corrigidas no editor (ADR-0011): perfil `fretting_profiles`, marcado pela API e atualizado pelo worker (grelha de 175 combinações, validação cruzada por tab com ≥ 3 tabs, aceite só se melhor que os pesos por omissão, mínimo 200 notas e 2 tabs); `GET/POST /v1/me/tuning`; as tabs novas usam os pesos aceites
+- [x] Aprender com 1 tab certa (validação por metades no tempo com 1 ou 2 tabs) e "Refazer as posições com o que aprendi" numa tab existente: `POST /v1/tabs/{id}/refret`, revisão `learned` (ADR-0016)
+- [ ] Aprender a deteção de notas (limiares do Basic Pitch e da limpeza) por utilizador com o áudio guardado e a tab certa — fase 2 proposta
 - [x] Detetar a afinação a partir das notas transcritas (ADR-0013): chão das notas graves + esforço do Viterbi para standard vs drop; 0,4 % de falsos alarmes em gravações E standard do GuitarSet; corda grave certa em 100 % das faixas afinadas abaixo que a tocam
 - [x] Limpeza das notas fracas antes do arranjo (`arrange/clean.py`): GuitarSet F1 0,777 → 0,800; neutra com banda (docs/eval/M3-notes.md)
 - [ ] Banda: a perda está na separação (BabySlakh: guitarra limpa F1 0,60, mistura 0,22). Medir em músicas reais se juntar as pistas "other"/"piano" do Demucs ajuda (no BabySlakh: F1 0,215 → 0,253)

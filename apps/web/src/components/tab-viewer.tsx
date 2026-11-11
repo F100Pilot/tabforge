@@ -5,11 +5,13 @@ import { useEffect, useRef, useState } from "react";
 import type { AlphaTabApi } from "@coderline/alphatab";
 import { getTab, isUnauthenticated, readScoreInfo, type ScoreInfo, type Tab } from "@/lib/api";
 import { SignInPrompt } from "./sign-in-prompt";
+import { RefretPanel } from "./refret-panel";
 import { TabCompare } from "./tab-compare";
 import { formatClock, formatTuning } from "@/lib/format";
 import { exportScore, saveFile, type ExportFormat } from "@/lib/export";
 import { noteName } from "@/lib/editor";
 import { warningSummary } from "@/lib/tracks";
+import { sourceLabel } from "@/lib/refret-view";
 import { loadScoreTheme, SCORE_COLORS, saveScoreTheme, type ScoreTheme } from "@/lib/score-theme";
 
 const ASSET_BASE = "/alphatab";
@@ -83,6 +85,7 @@ export function TabViewer({ tabId }: { tabId: string }) {
   return (
     <>
       <TabHeader tab={tab} info={info} theme={theme} onTheme={changeTheme} onPrint={print} />
+      <RefretPanel tab={tab} onTabChanged={setTab} />
       <TabCompare
         tabId={tab.id}
         revisionKey={tab.revision.id}
@@ -137,7 +140,7 @@ function TabHeader({
                 ♩ {Math.round(info.tempo_bpm)} · {info.time_signature ? info.time_signature.join("/") : "4/4"}
               </span>
             )}
-            <span className="chip">{tab.revision.source === "ai" ? "Gerada por IA" : "Editada por si"}</span>
+            <span className="chip">{sourceLabel(tab.revision.source)}</span>
             {tab.revision.source === "ai" && (
               <span className="chip chip-accent">Rascunho IA · verifique ritmo e posições</span>
             )}
