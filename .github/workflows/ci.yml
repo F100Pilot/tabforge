@@ -1,9 +1,16 @@
 name: CI
 
+# Not for changes to documentation only (ADR-0015).
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
 
 permissions:
   contents: read
@@ -177,19 +184,3 @@ jobs:
             apps/web/playwright-report/
             apps/web/test-results/
           retention-days: 7
-
-  docker:
-    runs-on: ubuntu-latest
-    needs: [python]
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -f services/api/Dockerfile -t tabforge-api .
-      - run: docker build -f services/worker/Dockerfile -t tabforge-worker .
-      - name: Worker image loads its models offline
-        run: >-
-          docker run --rm --network none tabforge-worker python -c
-          "from demucs.pretrained import get_model; get_model('htdemucs_6s');
-          from tabforge_worker.adapters.basic_pitch import BasicPitchOnnxTranscriber;
-          BasicPitchOnnxTranscriber(); print('models ok')"
-      - name: Compose file is valid
-        run: cp .env.example .env && docker compose config -q

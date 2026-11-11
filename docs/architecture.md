@@ -184,3 +184,4 @@ Aplicação Windows para um só utilizador, sem servidor. Os mesmos serviços co
 - [ADR-0012](adr/0012-instalador-so-a-pedido.md) — Instalador Windows só a pedido; em cada push testa-se o start.bat
 - [ADR-0013](adr/0013-detetar-a-afinacao.md) — Detetar a afinação da guitarra a partir das notas transcritas
 - [ADR-0014](adr/0014-importar-do-youtube.md) — Importar áudio de um link do YouTube (só no desktop)
+- [ADR-0015](adr/0015-ci-so-quando-faz-falta.md) — Workflows do GitHub Actions só quando o que testam muda (Windows, Docker e CodeQL deixam de correr em cada push)

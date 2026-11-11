@@ -1,11 +1,11 @@
 name: CodeQL
 
+# Weekly and on demand, not on every push (ADR-0015): the code changes in small steps.
 on:
-  push:
-    branches: [main]
   pull_request:
   schedule:
     - cron: "17 4 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read

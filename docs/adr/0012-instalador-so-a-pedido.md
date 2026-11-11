@@ -1,6 +1,6 @@
 # ADR-0012 — Instalador Windows só a pedido; em cada push testa-se o start.bat
 
-- **Estado:** Aceite
+- **Estado:** Aceite; alterado pelo [ADR-0015](0015-ci-so-quando-faz-falta.md) (o smoke test só corre quando mudam o launcher ou as dependências)
 - **Data:** 2026-11-05
 - **Substitui:** a linha "CI" do ADR-0008 (o resto do ADR-0008 mantém-se)
 

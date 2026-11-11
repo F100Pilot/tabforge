@@ -1,0 +1,55 @@
+name: Docker
+
+# The online stack's images (API, worker with its ML models) and the compose file. Built only
+# when what goes into them changes, weekly, and on demand (ADR-0015): TabForge runs on the PC
+# (ADR-0008) and the code itself is tested by CI on every push.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/*/Dockerfile"
+      - "services/*/pyproject.toml"
+      - "services/*/uv.lock"
+      - "packages/*/pyproject.toml"
+      - "packages/*/uv.lock"
+      - ".dockerignore"
+      - "docker-compose.yml"
+      - ".env.example"
+      - ".github/workflows/docker.yml"
+  pull_request:
+    paths:
+      - "services/*/Dockerfile"
+      - "services/*/pyproject.toml"
+      - "services/*/uv.lock"
+      - "packages/*/pyproject.toml"
+      - "packages/*/uv.lock"
+      - ".dockerignore"
+      - "docker-compose.yml"
+      - ".env.example"
+      - ".github/workflows/docker.yml"
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f services/api/Dockerfile -t tabforge-api .
+      - run: docker build -f services/worker/Dockerfile -t tabforge-worker .
+      - name: Worker image loads its models offline
+        run: >-
+          docker run --rm --network none tabforge-worker python -c
+          "from demucs.pretrained import get_model; get_model('htdemucs_6s');
+          from tabforge_worker.adapters.basic_pitch import BasicPitchOnnxTranscriber;
+          BasicPitchOnnxTranscriber(); print('models ok')"
+      - name: Compose file is valid
+        run: cp .env.example .env && docker compose config -q

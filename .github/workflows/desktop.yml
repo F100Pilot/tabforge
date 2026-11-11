@@ -1,19 +1,30 @@
 name: Desktop (Windows)
 
-# Every push: smoke-test start.bat, the way TabForge is run on the PC (it prepares the bundle
-# itself: Python env, downloads, Demucs weights, web build). Building and smoke-testing
-# TabForge.exe and TabForge-Setup.exe only on demand ("Run workflow"), since nobody installs it
-# for now (ADR-0008).
+# Smoke-test start.bat, the way TabForge is run on the PC (it prepares the bundle itself: Python
+# env, downloads, Demucs weights, web build), only when what the launcher installs or runs
+# changes (ADR-0015): the desktop app, start.bat or a Python dependency. Building and
+# smoke-testing TabForge.exe and TabForge-Setup.exe only on demand ("Run workflow"), since
+# nobody installs it for now (ADR-0012). "Run workflow" also forces the smoke test.
 on:
   pull_request:
     paths:
       - "apps/desktop/**"
-      - "apps/web/**"
-      - "services/**"
-      - "packages/**"
+      - "start.bat"
+      - "services/*/pyproject.toml"
+      - "services/*/uv.lock"
+      - "packages/*/pyproject.toml"
+      - "packages/*/uv.lock"
       - ".github/workflows/desktop.yml"
   push:
     branches: [main]
+    paths:
+      - "apps/desktop/**"
+      - "start.bat"
+      - "services/*/pyproject.toml"
+      - "services/*/uv.lock"
+      - "packages/*/pyproject.toml"
+      - "packages/*/uv.lock"
+      - ".github/workflows/desktop.yml"
   workflow_dispatch:
 
 permissions:
