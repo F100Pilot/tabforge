@@ -1,5 +1,5 @@
 # Build from the repository root: docker build -f services/api/Dockerfile .  (ADR-0005)
-FROM python:3.13-slim
+FROM python:3.15-slim
 COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /usr/local/bin/uv
 WORKDIR /app/services/api
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy PATH=/app/services/api/.venv/bin:$PATH
