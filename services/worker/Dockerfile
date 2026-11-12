@@ -1,7 +1,7 @@
 # Build from the repository root: docker build -f services/worker/Dockerfile .  (ADR-0005)
 # Same Python as the API; basic-pitch runs on ONNX without tensorflow (ADR-0002).
 # torch comes with its CUDA libraries: the PRD assumes a GPU worker in production.
-FROM python:3.13-slim
+FROM python:3.15-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg \
  && rm -rf /var/lib/apt/lists/*
